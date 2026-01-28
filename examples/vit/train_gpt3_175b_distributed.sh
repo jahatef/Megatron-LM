@@ -83,7 +83,7 @@ EVAL_AND_LOGGING_ARGS=(
 
 rm -rf $CHECKPOINT_PATH/*
 rm -rf $TENSORBOARD_LOGS_PATH/*
-torchrun ${DISTRIBUTED_ARGS[@]} pretrain_gpt.py \
+torchrun ${DISTRIBUTED_ARGS[@]} pretrain_vision_classify.py \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \
