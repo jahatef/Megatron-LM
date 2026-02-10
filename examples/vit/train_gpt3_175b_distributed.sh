@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# Runs the "175B" parameter model
-
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 GPUS_PER_NODE=1
@@ -31,7 +29,10 @@ GPT_MODEL_ARGS=(
     --num-attention-heads 16 
     --seq-length 8192 
     --max-position-embeddings 8192 
+    --img-size 224 \
+    --patch-dim 16 \
     --attention-backend flash # Can use (flash/fused/unfused/local)
+    --transformer-impl transformer_engine
 )
 
 TRAINING_ARGS=(
@@ -66,7 +67,8 @@ DATA_ARGS=(
     --data-path $DATA_PATH 
     --vocab-file $VOCAB_FILE 
     --merge-file $MERGE_FILE 
-    --split 949,50,1
+    --split 100,0,0
+    --num-classes 4
 )
 
 EVAL_AND_LOGGING_ARGS=(
@@ -83,7 +85,7 @@ EVAL_AND_LOGGING_ARGS=(
 
 rm -rf $CHECKPOINT_PATH/*
 rm -rf $TENSORBOARD_LOGS_PATH/*
-torchrun ${DISTRIBUTED_ARGS[@]} pretrain_vision_classify.py \
+torchrun ${DISTRIBUTED_ARGS[@]} pretrain_vision.py \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \
     ${MODEL_PARALLEL_ARGS[@]} \

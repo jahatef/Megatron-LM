@@ -3206,6 +3206,8 @@ def _add_vision_args(parser):
                        help='Image height for vision classification task')
     group.add_argument('--img-w', type=int, default=224,
                        help='Image height for vision classification task')
+    group.add_argument('--img-size', type=int, default=224,
+                       help='Image size for vision classification task')
     group.add_argument('--num-channels', type=int, default=3,
                        help='Number of channels in input image data')
     group.add_argument('--patch-dim', type=int, default=16,

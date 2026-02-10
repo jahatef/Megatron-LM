@@ -22,6 +22,9 @@ class BlendedMegatronDatasetConfig:
     sequence_length: int
     """The sequence length."""
 
+    image_size: int
+    """The image size"""
+
     blend: Optional[Tuple[List[str], Optional[List[float]]]] = None
     """The blend, consisting of a list of dataset prefixes and optionally a list of dataset
        weights. For example, [["dataset-path1", "dataset-path2"], [0.3, 0.7]]. When the weights are
