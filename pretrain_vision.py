@@ -76,7 +76,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         )
 
         # Classification head (optional; can be removed for MAE-style pretrain)
-        print(f"\n\n\n number of classes: {args.num_classes}\n\n\n")
+        #print(f"\n\n\n number of classes: {args.num_classes}\n\n\n")
         self.head = torch.nn.Linear(self.hidden_size, args.num_classes)
 
         self._init_weights()
@@ -122,17 +122,17 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
             dtype=torch.bool,
         )
         x = self.encoder(x,attention_mask)
-        print(f"\n\n\n x before head: {x.shape} \n\n\n")
+        #print(f"\n\n\n x before head: {x.shape} \n\n\n")
         cls_out = x[0]
 
         logits = self.head(cls_out)
-        print(f"logits shape: {logits.shape}")
+        #print(f"logits shape: {logits.shape}")
 
         if labels is None:
             return logits
         labels = labels.long()
         loss = F.cross_entropy(logits, labels)
-        return logits, F.cross_entropy
+        return  loss
 
 
 # -----------------------
@@ -295,8 +295,14 @@ def forward_step(data_iterator, model):
     images, labels = get_batch(data_iterator)
     timers("batch").stop()
 
-    loss = model(images, labels)
-    return loss, lambda x: x
+    logits = model(images)
+    def loss_func(output_tensor):
+        loss = F.cross_entropy(output_tensor, labels)
+
+        loss_dict = {"loss": loss}
+        return loss, loss_dict
+
+    return logits, loss_func
 
 
 # -----------------------

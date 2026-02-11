@@ -113,7 +113,7 @@ def compute_weight_and_optimizer_memory(args, verbose=False):
         )
         + self_attn_term
     )
-    embedding_size = args.hidden_size * args.padded_vocab_size
+    embedding_size = args.hidden_size * args.num_classes if args.patch_dim else args.hidden_size * args.padded_vocab_size 
     final_layernorm = 2 * args.hidden_size
     if args.untie_embeddings_and_output_weights:
         num_parameters_in_embedding_layers = 2 * embedding_size
@@ -318,7 +318,7 @@ def compute_activation_memory_without_sp(args, num_microbatches, verbose=False):
     # 8. Add output layer memory if needed
     if args.pipeline_model_parallel_size == 1:
         # Logits calculation
-        logits_size = args.seq_length * args.micro_batch_size * args.padded_vocab_size
+        logits_size = args.patch_dim ** 2 * 3 * args.hidden_size if args.patch_dim else args.seq_length * args.micro_batch_size * args.padded_vocab_size
         # The output projection is partitioned across TP
         logits_size /= args.tensor_model_parallel_size
 

@@ -62,7 +62,7 @@ class MegatronVisionDataset(MegatronDataset):
             index_split=index_split,
             config=config,
         )
-        print(f"\n\n\n {type(config.image_size)} \n\n\n")
+        #print(f"\n\n\n {type(config.image_size)} \n\n\n")
         image_size = config.image_size
         self.transform = transforms.Compose([
                 transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),

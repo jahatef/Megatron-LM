@@ -529,46 +529,91 @@ def num_floating_point_operations(args, batch_size):
             linear_self_attn_term * num_linear_attention_layers
             + standard_self_attn_term * num_standard_attention_layers
         )
-
-        total_floating_point_operations = (
-            batch_size
-            * args.seq_length
-            * (
-                # MLP
-                forward_backward_expansion_factor
-                * fma_expansion_factor
-                * args.hidden_size
+        if args.patch_dim: #if this is a ViT model
+            seq_len = (args.img_size // args.patch_dim) **2 + 1
+            total_floating_point_operations = (
+                batch_size
+                * seq_len
                 * (
-                    # dense layer (deepseek v2, v3 style)
-                    (args.ffn_hidden_size * ffn_expansion_factor)
-                    * num_dense_layers
-                    # routed experts
-                    + (moe_ffn_hidden_size * num_experts_routed_to * ffn_expansion_factor)
-                    * num_moe_layers
-                    # Shared Experts.
-                    + (shared_expert_ffn_hidden_size * ffn_expansion_factor)
-                    * num_moe_layers
+                    #patch embeddings
+                    forward_backward_expansion_factor
+                    * (3 * (args.patch_dim ** 2)) * args.hidden_size
+                    +
+                    # MLP
+                    forward_backward_expansion_factor
+                    * fma_expansion_factor
+                    * args.hidden_size
+                    * (
+                        # dense layer (deepseek v2, v3 style)
+                        (args.ffn_hidden_size * ffn_expansion_factor)
+                        * num_dense_layers
+                        # routed experts
+                        + (moe_ffn_hidden_size * num_experts_routed_to * ffn_expansion_factor)
+                        * num_moe_layers
+                        # Shared Experts.
+                        + (shared_expert_ffn_hidden_size * ffn_expansion_factor)
+                        * num_moe_layers
+                    )
+                    # Self Attention
+                    + self_attn_term
+                    # MTP norms and proj
+                    + forward_backward_expansion_factor
+                    * fma_expansion_factor
+                    * mtp_num_layers
+                    * (
+                        # MTP eh norm + final nrom
+                        3 * args.hidden_size
+                        # MTH eh proj
+                        + 2 * args.hidden_size * args.hidden_size
+                    )
+                    # Logit.
+                    + forward_backward_expansion_factor
+                    * fma_expansion_factor
+                    * args.hidden_size
+                    * args.num_classes
+                    #* (mtp_num_layers + 1)  # MTP + final logit
                 )
-                # Self Attention
-                + self_attn_term
-                # MTP norms and proj
-                + forward_backward_expansion_factor
-                * fma_expansion_factor
-                * mtp_num_layers
-                * (
-                    # MTP eh norm + final nrom
-                    3 * args.hidden_size
-                    # MTH eh proj
-                    + 2 * args.hidden_size * args.hidden_size
-                )
-                # Logit.
-                + forward_backward_expansion_factor
-                * fma_expansion_factor
-                * args.hidden_size
-                * args.padded_vocab_size
-                * (mtp_num_layers + 1)  # MTP + final logit
             )
-        )
+        else:
+            total_floating_point_operations = (
+                batch_size
+                * args.seq_length
+                * (
+                    # MLP
+                    forward_backward_expansion_factor
+                    * fma_expansion_factor
+                    * args.hidden_size
+                    * (
+                        # dense layer (deepseek v2, v3 style)
+                        (args.ffn_hidden_size * ffn_expansion_factor)
+                        * num_dense_layers
+                        # routed experts
+                        + (moe_ffn_hidden_size * num_experts_routed_to * ffn_expansion_factor)
+                        * num_moe_layers
+                        # Shared Experts.
+                        + (shared_expert_ffn_hidden_size * ffn_expansion_factor)
+                        * num_moe_layers
+                    )
+                    # Self Attention
+                    + self_attn_term
+                    # MTP norms and proj
+                    + forward_backward_expansion_factor
+                    * fma_expansion_factor
+                    * mtp_num_layers
+                    * (
+                        # MTP eh norm + final nrom
+                        3 * args.hidden_size
+                        # MTH eh proj
+                        + 2 * args.hidden_size * args.hidden_size
+                    )
+                    # Logit.
+                    + forward_backward_expansion_factor
+                    * fma_expansion_factor
+                    * args.hidden_size
+                    * args.padded_vocab_size
+                    * (mtp_num_layers + 1)  # MTP + final logit
+                )
+            )
         return total_floating_point_operations
 
     # Main entrypoint for FLOPs calculation.
