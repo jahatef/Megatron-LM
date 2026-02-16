@@ -63,9 +63,12 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         self.cls_token = torch.nn.Parameter(torch.zeros(1, 1, self.hidden_size))
 
         # Position embedding
-        self.pos_embed = torch.nn.Parameter(
-            torch.zeros(1, self.num_patches + 1, self.hidden_size)
-        )
+        if self.pos_embed_type == "absolute":
+            self.pos_embed = torch.nn.Parameter(
+                torch.zeros(1, self.num_patches + 1, self.hidden_size)
+            )
+        else:
+            self.pos_embed = None
 
         # Transformer encoder
         self.encoder = TransformerBlock(
@@ -80,7 +83,11 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         self.head = torch.nn.Linear(self.hidden_size, args.num_classes)
 
         self._init_weights()
-
+        
+        # Precompute RoPE cache
+        if self.pos_embed_type == "rope":
+            
+            
     def _init_weights(self):
         torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
         torch.nn.init.trunc_normal_(self.cls_token, std=0.02)
@@ -107,7 +114,8 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         x = torch.cat((cls_tokens, x), dim=1)      # [B, N+1, D]
 
         # Add positional embeddings
-        x = x + self.pos_embed
+        if self.pos_embed is not None:
+            x = x + self.pos_embed
 
         # Megatron expects [seq, batch, hidden]
         x = x.transpose(0, 1)
@@ -220,7 +228,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples=[20, 1, 1]):
         image_size=224,
         blend_per_split=[
             ([os.path.join(dataset_root, "training")], None),
-            None, None, #([os.path.join(dataset_root, "testing")],   None),
+            ([os.path.join(dataset_root, "testing")],   None), None
             #([os.path.join(dataset_root, "testing")],  None),
         ],
     )

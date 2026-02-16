@@ -29,7 +29,7 @@ GPT_MODEL_ARGS=(
     --num-attention-heads 16 
     --seq-length 8192 
     --max-position-embeddings 8192 
-    --img-size 224 \
+    --img-size 512 \
     --patch-dim 16 \
     --attention-backend flash # Can use (flash/fused/unfused/local)
     --transformer-impl transformer_engine
@@ -67,19 +67,22 @@ DATA_ARGS=(
     --data-path $DATA_PATH 
     --vocab-file $VOCAB_FILE 
     --merge-file $MERGE_FILE 
-    --split 100,0,0
+    --split 80,20,0
     --num-classes 4
 )
 
 EVAL_AND_LOGGING_ARGS=(
     --log-interval 1
     --save-interval 10000 
-    --eval-interval 1000 
+    --eval-interval 10 
     --save $CHECKPOINT_PATH 
     --load $CHECKPOINT_PATH 
-    --eval-iters 0
+    --eval-iters 20
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
     --log-throughput
+    --log-params-norm
+    --wandb-project vit-synth-rope-experiments
+    --wandb-exp-name test
 )
 
 
