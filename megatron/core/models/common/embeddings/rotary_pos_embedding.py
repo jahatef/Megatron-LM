@@ -30,7 +30,7 @@ from megatron.core.utils import deprecate_inference_params, internal_api
 logger = logging.getLogger(__name__)
 
 
-__all__ = ['RotaryEmbedding', 'MultimodalRotaryEmbedding']
+__all__ = ['RotaryEmbedding', 'MultimodalRotaryEmbedding','RotaryEmbeddingDinoV3']
 
 
 class RotaryEmbedding(nn.Module):
@@ -357,3 +357,73 @@ class MultimodalRotaryEmbedding(nn.Module):
             # CP rank
             emb = get_pos_emb_on_this_cp_rank(emb, 0, cp_group)
         return emb
+
+class RotaryEmbeddingDinoV3(nn.Module):
+    """Axial RoPE numerics matching DINOv3 for Vision Transformers.
+
+    Produces sin/cos embeddings for 2D patch grids.
+    DOES NOT rotate tensors directly (Megatron-compatible).
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        temperature: float = 100.0,
+        normalize_coords: str = "separate",
+        rotate_half: bool = True,
+    ) -> None:
+        super().__init__()
+
+        self.dim = dim
+        self.rotate_half = rotate_half
+        self.temperature = float(temperature)
+        self.normalize_coords = normalize_coords
+
+        inv_freq = self.temperature ** (
+            2.0 * torch.arange(dim // 4, dtype=torch.float32) / (dim // 2)
+        )
+
+        self.register_buffer("periods", inv_freq, persistent=False)
+
+    def _build_coords(self, H: int, W: int, device) -> Tensor:
+        y, x = torch.meshgrid(
+            torch.arange(H, device=device),
+            torch.arange(W, device=device),
+            indexing="ij",
+        )
+
+        y = (y + 0.5) / H * 2 - 1
+        x = (x + 0.5) / W * 2 - 1
+
+        coords = torch.stack([y, x], dim=-1)
+        return coords.view(-1, 2)
+
+    def get_embed(self, H: int, W: int, device) -> Tensor:
+        coords = self._build_coords(H, W, device)
+
+        dim = self.dim // 4
+
+        coords = coords[:, :, None]
+        angles = 2 * math.pi * coords / self.periods[None, None, :].to(device)
+
+        angles = angles.flatten(1)
+
+        if self.rotate_half:
+            angles = torch.cat([angles, angles], dim=-1)
+        else:
+            angles = angles.repeat_interleave(2, dim=-1)
+
+        sin = torch.sin(angles)
+        cos = torch.cos(angles)
+
+        emb = torch.cat([sin, cos], dim=-1)
+        print(f"\n\n embed size: {emb.size()}\n\n")
+
+        # Megatron expects [seq, 1, 1, dim]
+        return emb[:, None, None, :]
+
+    def forward(self, seq_len: int, H: int, W: int, device=None) -> Tensor:
+        if device is None:
+            device = self.periods.device
+
+        return self.get_embed(H, W, device)

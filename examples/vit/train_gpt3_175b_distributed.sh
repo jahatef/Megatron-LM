@@ -29,6 +29,7 @@ GPT_MODEL_ARGS=(
     --num-attention-heads 16 
     --seq-length 8192 
     --max-position-embeddings 8192 
+    --position-embedding-type rope
     --img-size 512 \
     --patch-dim 16 \
     --attention-backend flash # Can use (flash/fused/unfused/local)

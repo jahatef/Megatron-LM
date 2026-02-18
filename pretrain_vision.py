@@ -15,6 +15,7 @@ from megatron.core.models.vision.vit_layer_specs import (
     get_vit_layer_with_local_spec,
     get_vit_layer_with_transformer_engine_spec,
 )
+from megatron.core.models.common.embeddings import RotaryEmbeddingDinoV3
 
 from megatron.training import (
     get_args,
@@ -43,12 +44,16 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         super().__init__(config=config)
         args = get_args()
         self.config = config
+        self.pos_embed_type = args.position_embedding_type
+
 
         self.hidden_size = config.hidden_size
         self.patch_size = args.patch_dim
-        self.img_h = args.img_h
-        self.img_w = args.img_w
+        self.img_h = args.img_size
+        self.img_w = args.img_size
+        print(f"\n\nheight:{self.img_h}, width:{self.img_w}\n\n")
         self.num_patches = (self.img_h // self.patch_size) * (self.img_w // self.patch_size)
+        print(f"\n\npatch size: {self.patch_size}\n\n")
 
         # Patch embedding
         self.patch_embed = torch.nn.Conv2d(
@@ -86,11 +91,19 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         
         # Precompute RoPE cache
         if self.pos_embed_type == "rope":
+            self.rotary_emb = RotaryEmbeddingDinoV3(
+                dim=self.hidden_size // config.num_attention_heads
+            )
+        else:
+            self.rotary_emb = None
+
+
             
             
     def _init_weights(self):
-        torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
-        torch.nn.init.trunc_normal_(self.cls_token, std=0.02)
+        if self.pos_embed is not None:
+            torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
+            torch.nn.init.trunc_normal_(self.cls_token, std=0.02)
 
     def set_input_tensor(self, input_tensor: Tensor):
         """Set input tensor to be used instead of forward()'s input.
@@ -107,6 +120,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
 
         # Patchify
         x = self.patch_embed(images)               # [B, C, H', W']
+        print(f"\n\nx size: {x.size()}\n\n")
         x = x.flatten(2).transpose(1, 2)           # [B, N, D]
 
         # Add CLS token
@@ -123,13 +137,33 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         # Transformer
         seq_len, batch_size, H = x.shape
 
+        rotary_pos_emb = None
+
+        if self.rotary_emb is not None:
+            head_dim = self.hidden_size // self.config.num_attention_heads
+
+            rotary_pos_emb = self.rotary_emb(
+                seq_len=seq_len,
+                H=self.img_h // self.patch_size,
+                W=self.img_w // self.patch_size,
+                device=x.device,
+            )
+
         # Vision has no masking → allow all attention
         attention_mask = torch.ones(
             (batch_size, 1, seq_len, seq_len),
             device=x.device,
             dtype=torch.bool,
         )
-        x = self.encoder(x,attention_mask)
+        if rotary_pos_emb is not None:
+            pass #rotary_pos_emb = rotary_pos_emb[1:]  # remove CLS position
+        print(f"\n\npos_emb: {rotary_pos_emb.size()}, x: {x.size()}\n\n")
+        x = self.encoder(
+            x,
+            attention_mask=attention_mask,
+            rotary_pos_emb=rotary_pos_emb,
+        )
+
         #print(f"\n\n\n x before head: {x.shape} \n\n\n")
         cls_out = x[0]
 
@@ -225,7 +259,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples=[20, 1, 1]):
         sequence_length=0,
         #split=args.split,
         tokenizer=None,
-        image_size=224,
+        image_size=args.img_size,
         blend_per_split=[
             ([os.path.join(dataset_root, "training")], None),
             ([os.path.join(dataset_root, "testing")],   None), None
