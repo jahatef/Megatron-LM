@@ -15,7 +15,7 @@ from megatron.core.models.vision.vit_layer_specs import (
     get_vit_layer_with_local_spec,
     get_vit_layer_with_transformer_engine_spec,
 )
-from megatron.core.models.common.embeddings import RotaryEmbeddingDinoV3
+from megatron.core.models.common.embeddings import RotaryEmbeddingDinoV3, RotaryEmbedding
 
 from megatron.training import (
     get_args,
@@ -43,6 +43,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
     def __init__(self, config: TransformerConfig):
         super().__init__(config=config)
         args = get_args()
+        config.num_prefix_tokens = 1
         self.config = config
         self.pos_embed_type = args.position_embedding_type
 
@@ -94,6 +95,10 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
             self.rotary_emb = RotaryEmbeddingDinoV3(
                 dim=self.hidden_size // config.num_attention_heads
             )
+            '''self.rotary_emb = RotaryEmbedding(
+                kv_channels = self.config.kv_channels,
+                rotary_percent=1
+            )'''
         else:
             self.rotary_emb = None
 
@@ -141,7 +146,10 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
 
         if self.rotary_emb is not None:
             head_dim = self.hidden_size // self.config.num_attention_heads
-
+            '''rotary_pos_emb = self.rotary_emb(
+                max_seq_len=seq_len
+            )
+            '''
             rotary_pos_emb = self.rotary_emb(
                 seq_len=seq_len,
                 H=self.img_h // self.patch_size,

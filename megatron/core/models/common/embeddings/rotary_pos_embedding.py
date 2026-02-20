@@ -160,8 +160,8 @@ class RotaryEmbedding(nn.Module):
         if self.inv_freq.device.type == 'cpu':
             # move `inv_freq` to GPU once at the first micro-batch forward pass
             self.inv_freq = self.inv_freq.to(device=torch.cuda.current_device())
-
         freqs = self.get_freqs_non_repeated(max_seq_len, offset)
+        print(f"freqs size: {freqs.size()}")
         # first part even vector components, second part odd vector components,
         #  2 * dim in dimension size
         if not self.rotary_interleaved:
@@ -171,6 +171,7 @@ class RotaryEmbedding(nn.Module):
                 freqs.shape[0], -1
             )
         # emb [seq_length, .., dim]
+        print(f"emb size: {emb.size()}")
         emb = emb[:, None, None, :]
         return emb
 
@@ -202,7 +203,7 @@ class RotaryEmbedding(nn.Module):
             # slice rotary_pos_emb along sequence dimension
             # and select the parition of the current CP rank
             emb = get_pos_emb_on_this_cp_rank(emb, 0, cp_group)
-
+        print(f"\nemb at forward return: {emb.size()}\n")
         return emb
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
@@ -378,12 +379,15 @@ class RotaryEmbeddingDinoV3(nn.Module):
         self.rotate_half = rotate_half
         self.temperature = float(temperature)
         self.normalize_coords = normalize_coords
+        print(f"\ndim at rope: {self.dim}\n")
 
         inv_freq = self.temperature ** (
             2.0 * torch.arange(dim // 4, dtype=torch.float32) / (dim // 2)
         )
 
         self.register_buffer("periods", inv_freq, persistent=False)
+        print(f"\nperiods size: {self.periods.size()}\n")
+
 
     def _build_coords(self, H: int, W: int, device) -> Tensor:
         y, x = torch.meshgrid(
@@ -405,22 +409,24 @@ class RotaryEmbeddingDinoV3(nn.Module):
 
         coords = coords[:, :, None]
         angles = 2 * math.pi * coords / self.periods[None, None, :].to(device)
+        print(f"\nangles size: {angles.size()}\n")
 
         angles = angles.flatten(1)
-
+        print(f"\nangles size after flatten: {angles.size()}\n")
         if self.rotate_half:
             angles = torch.cat([angles, angles], dim=-1)
         else:
             angles = angles.repeat_interleave(2, dim=-1)
-
+        print(f"\nangles sizeafter branch: {angles.size()}\n")
         sin = torch.sin(angles)
         cos = torch.cos(angles)
 
         emb = torch.cat([sin, cos], dim=-1)
         print(f"\n\n embed size: {emb.size()}\n\n")
+        torch.save(emb.cpu(),"/workspace/megatron-lm/mlm_emb_tensor")
 
         # Megatron expects [seq, 1, 1, dim]
-        return emb[:, None, None, :]
+        return angles[:, None, None, :] #cos[:, None, None, :], sin[:, None, None, :]
 
     def forward(self, seq_len: int, H: int, W: int, device=None) -> Tensor:
         if device is None:

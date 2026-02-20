@@ -912,6 +912,8 @@ class Attention(MegatronModule, ABC):
             (Tuple[Tensor, Tensor]) Attention output and bias.
 
         """
+        hidden_states = torch.load("/workspace/megatron-lm/attention-inputs-mlm").to("cuda",dtype=torch.bfloat16)
+        torch.save(hidden_states.cpu(),"/workspace/megatron-lm/attention-inputs-mlm")
         # Check if we need to skip RoPE
         # no_rope is 0-indexed array and self.layer_number is 1-indexed
         no_rope = (
@@ -1076,7 +1078,9 @@ class Attention(MegatronModule, ABC):
         if rotary_pos_emb is not None and (
             not self.config.flash_decode or inference_context is None
         ):
+            #print(f"rotary_pos_emb size: {rotary_pos_emb}")
             q_pos_emb, k_pos_emb = rotary_pos_emb
+            print(f"q_pos_emb size: {q_pos_emb.size()}, k_pos_emb size: {k_pos_emb.size()}")
 
             if packed_seq_params is not None and packed_seq_params.qkv_format == 'thd':
                 if packed_seq_params.cu_seqlens_q_padded is not None:
@@ -1091,6 +1095,17 @@ class Attention(MegatronModule, ABC):
                 cu_seqlens_q = cu_seqlens_kv = None
 
             if split_qkv:
+                query = torch.load("/workspace/megatron-lm/query-inputs-mlm").to("cuda",dtype=torch.bfloat16)
+                key = torch.load("/workspace/megatron-lm/key-inputs-mlm").to("cuda",dtype=torch.bfloat16)
+        
+                torch.save(query.cpu(),"/workspace/megatron-lm/query-inputs-mlm")
+                torch.save(key.cpu(),"/workspace/megatron-lm/key-inputs-mlm")
+                num_prefix_tokens = self.config.num_prefix_tokens
+                num_pos_tokens = hidden_states.size()[0] - num_prefix_tokens
+                print(f"\n\nquery shape: {query.size()}, num_prefix_tokens: {num_prefix_tokens}, num_pos_tokens: {num_pos_tokens}\n\n")
+                q_prefix_token, query = query.split((num_prefix_tokens, num_pos_tokens), dim=0)
+                k_prefix_token, key = key.split((num_prefix_tokens, num_pos_tokens), dim=0)
+                print(f"query shape after split: {query.size()}, pos_emb size: {q_pos_emb.size()}")
                 if q_pos_emb is not None:
                     # TODO VIJAY: simplify
                     if inference_context is None or inference_context.is_static_batching():
@@ -1115,6 +1130,11 @@ class Attention(MegatronModule, ABC):
                         mscale=_yarn_get_concentration_factor_from_config(self.config),
                         cp_group=self.pg_collection.cp,
                     )
+                query = torch.cat((q_prefix_token, query), dim=0)
+                key = torch.cat((k_prefix_token, key), dim=0)
+                torch.save(query.cpu(),"/workspace/megatron-lm/query-outputs-mlm")
+                torch.save(key.cpu(),"/workspace/megatron-lm/key-outputs-mlm")
+                
             else:
                 query, key, value = apply_fused_qkv_rotary_pos_emb(
                     mixed_qkv, q_pos_emb, k_pos_emb, qkv_split_arg_list
@@ -1211,7 +1231,8 @@ class Attention(MegatronModule, ABC):
                 output, name="attn_proj", forced_released_tensors=[core_attn_out]
             )
         nvtx_range_pop(suffix="linear_proj")
-
+        torch.save(output.cpu(),"/workspace/megatron-lm/attention-outputs-mlm")
+        assert False
         return output, bias
 
     @jit_fuser

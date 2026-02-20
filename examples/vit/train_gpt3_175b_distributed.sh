@@ -1,14 +1,19 @@
 #!/bin/bash
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
-
-GPUS_PER_NODE=1
+PYTORCH_IMAGE=nvcr.io/nvidia/pytorch:24.01-py3
+export CHECKPOINT_PATH="/workspace/checkpoints" 
+export TENSORBOARD_LOGS_PATH="/workspace/megatron-lm/logs" #<Specify path>
+export VOCAB_FILE="/workspace/data/gpt2-vocab.json"
+export MERGE_FILE="/workspace/data/gpt2-merges.txt"
+export DATA_PATH="/workspace/dataset/"
+export GPUS_PER_NODE=1
 # Change for multinode config
-MASTER_ADDR=localhost
-MASTER_PORT=6000
-NUM_NODES=1
-NODE_RANK=0
-WORLD_SIZE=$(($GPUS_PER_NODE*$NUM_NODES))
+export MASTER_ADDR=localhost
+export MASTER_PORT=6000
+export NUM_NODES=1
+export NODE_RANK=0
+export WORLD_SIZE=$(($GPUS_PER_NODE*$NUM_NODES))
 
 CHECKPOINT_PATH=$1 #<Specify path>
 TENSORBOARD_LOGS_PATH=$2 #<Specify path>
@@ -25,8 +30,8 @@ DISTRIBUTED_ARGS=(
 
 GPT_MODEL_ARGS=(
     --num-layers 16 
-    --hidden-size 2048 
-    --num-attention-heads 16 
+    --hidden-size 384 
+    --num-attention-heads 6 
     --seq-length 8192 
     --max-position-embeddings 8192 
     --position-embedding-type rope

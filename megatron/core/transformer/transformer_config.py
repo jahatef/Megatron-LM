@@ -161,6 +161,10 @@ class TransformerConfig(ModelParallelConfig):
     """Store the input of MLP activation function in FP8 for backprop to save memory.
     The stored input is casted back to the original precision before backprop compuatation."""
 
+    num_prefix_tokens: Optional[int] = 0
+    """Skips this number of tokens at the beginning of the sequence before applying positional embeddings.
+    Useful when doing vision transformers to skip the cls token."""
+
     glu_linear_offset: float = 0.0
     """Offset term in the GLU activation function: activation_func(x[0]) * (x[1] + offset). Only 
     used when gated_linear_unit is True"""
