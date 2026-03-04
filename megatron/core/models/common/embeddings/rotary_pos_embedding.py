@@ -381,9 +381,8 @@ class RotaryEmbeddingDinoV3(nn.Module):
         self.normalize_coords = normalize_coords
         print(f"\ndim at rope: {self.dim}\n")
 
-        inv_freq = self.temperature ** (
-            2.0 * torch.arange(dim // 4, dtype=torch.float32) / (dim // 2)
-        )
+        inv_freq = 1/self.temperature ** torch.arange(0, 1, 4/self.dim, dtype=torch.float32)
+        
 
         self.register_buffer("periods", inv_freq, persistent=False)
         print(f"\nperiods size: {self.periods.size()}\n")
@@ -405,16 +404,17 @@ class RotaryEmbeddingDinoV3(nn.Module):
     def get_embed(self, H: int, W: int, device) -> Tensor:
         coords = self._build_coords(H, W, device)
 
-        dim = self.dim // 4
-
         coords = coords[:, :, None]
-        angles = 2 * math.pi * coords / self.periods[None, None, :].to(device)
+        torch.save(coords.cpu(), "/workspace/megatron-lm/mlm-tensors/coords")
+        torch.save(self.periods.cpu(), "/workspace/megatron-lm/mlm-tensors/periods")
+        self.periods = torch.load("/workspace/megatron-lm/mlm-tensors/periods")
+        angles = 2 * math.pi * coords * self.periods[None, None, :].to(device)
         print(f"\nangles size: {angles.size()}\n")
 
-        angles = angles.flatten(1)
+        angles = angles.flatten(1,2)
         print(f"\nangles size after flatten: {angles.size()}\n")
         if self.rotate_half:
-            angles = torch.cat([angles, angles], dim=-1)
+            angles = angles.tile(2)
         else:
             angles = angles.repeat_interleave(2, dim=-1)
         print(f"\nangles sizeafter branch: {angles.size()}\n")
@@ -423,7 +423,8 @@ class RotaryEmbeddingDinoV3(nn.Module):
 
         emb = torch.cat([sin, cos], dim=-1)
         print(f"\n\n embed size: {emb.size()}\n\n")
-        torch.save(emb.cpu(),"/workspace/megatron-lm/mlm_emb_tensor")
+        torch.save(emb.cpu(),"/workspace/megatron-lm/mlm-tensors/cos_sin_cat_emb")
+        torch.save(angles.cpu(), "/workspace/megatron-lm/mlm-tensors/angles")
 
         # Megatron expects [seq, 1, 1, dim]
         return angles[:, None, None, :] #cos[:, None, None, :], sin[:, None, None, :]

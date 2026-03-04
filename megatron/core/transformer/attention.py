@@ -912,8 +912,13 @@ class Attention(MegatronModule, ABC):
             (Tuple[Tensor, Tensor]) Attention output and bias.
 
         """
-        hidden_states = torch.load("/workspace/megatron-lm/attention-inputs-mlm").to("cuda",dtype=torch.bfloat16)
-        torch.save(hidden_states.cpu(),"/workspace/megatron-lm/attention-inputs-mlm")
+        
+        torch.save(hidden_states.cpu(),"/workspace/megatron-lm/mlm-tensors/attention-inputs")
+        hidden_states = torch.load("/workspace/megatron-lm/hf-tensors/attention-inputs").to("cuda",dtype=torch.bfloat16).transpose(0,1)
+        cls_token, _, hidden_states = hidden_states.split((1, 4, 1024), dim=0)
+        hidden_states = torch.cat((cls_token, hidden_states), dim=0)
+        print(f"hidden_states at attention forward: {hidden_states.size()}")
+
         # Check if we need to skip RoPE
         # no_rope is 0-indexed array and self.layer_number is 1-indexed
         no_rope = (
@@ -1095,16 +1100,17 @@ class Attention(MegatronModule, ABC):
                 cu_seqlens_q = cu_seqlens_kv = None
 
             if split_qkv:
-                query = torch.load("/workspace/megatron-lm/query-inputs-mlm").to("cuda",dtype=torch.bfloat16)
-                key = torch.load("/workspace/megatron-lm/key-inputs-mlm").to("cuda",dtype=torch.bfloat16)
-        
-                torch.save(query.cpu(),"/workspace/megatron-lm/query-inputs-mlm")
-                torch.save(key.cpu(),"/workspace/megatron-lm/key-inputs-mlm")
+                torch.save(query.cpu(),"/workspace/megatron-lm/mlm-tensors/query-rope-inputs")
+                torch.save(key.cpu(),"/workspace/megatron-lm/mlm-tensors/key-rope-inputs")
+                query = torch.load("/workspace/megatron-lm/hf-tensors/query-rope-inputs").to("cuda",dtype=torch.bfloat16).transpose(0,2).transpose(1,2)
+                print(f"hf query size at mlm rope: {query.size()}")
+                key = torch.load("/workspace/megatron-lm/hf-tensors/key-rope-inputs").to("cuda",dtype=torch.bfloat16).transpose(0, 2).transpose(1,2)
+                
                 num_prefix_tokens = self.config.num_prefix_tokens
                 num_pos_tokens = hidden_states.size()[0] - num_prefix_tokens
                 print(f"\n\nquery shape: {query.size()}, num_prefix_tokens: {num_prefix_tokens}, num_pos_tokens: {num_pos_tokens}\n\n")
-                q_prefix_token, query = query.split((num_prefix_tokens, num_pos_tokens), dim=0)
-                k_prefix_token, key = key.split((num_prefix_tokens, num_pos_tokens), dim=0)
+                q_prefix_token, _, query = query.split((num_prefix_tokens, 4,num_pos_tokens), dim=0)
+                k_prefix_token, _, key = key.split((num_prefix_tokens, 4,num_pos_tokens), dim=0)
                 print(f"query shape after split: {query.size()}, pos_emb size: {q_pos_emb.size()}")
                 if q_pos_emb is not None:
                     # TODO VIJAY: simplify
@@ -1132,8 +1138,8 @@ class Attention(MegatronModule, ABC):
                     )
                 query = torch.cat((q_prefix_token, query), dim=0)
                 key = torch.cat((k_prefix_token, key), dim=0)
-                torch.save(query.cpu(),"/workspace/megatron-lm/query-outputs-mlm")
-                torch.save(key.cpu(),"/workspace/megatron-lm/key-outputs-mlm")
+                torch.save(query.cpu(),"/workspace/megatron-lm/mlm-tensors/query-rope-outputs")
+                torch.save(key.cpu(),"/workspace/megatron-lm/mlm-tensors/key-rope-outputs")
                 
             else:
                 query, key, value = apply_fused_qkv_rotary_pos_emb(
@@ -1231,7 +1237,7 @@ class Attention(MegatronModule, ABC):
                 output, name="attn_proj", forced_released_tensors=[core_attn_out]
             )
         nvtx_range_pop(suffix="linear_proj")
-        torch.save(output.cpu(),"/workspace/megatron-lm/attention-outputs-mlm")
+        torch.save(output.cpu(),"/workspace/megatron-lm/mlm-tensors/attention-output")
         assert False
         return output, bias
 

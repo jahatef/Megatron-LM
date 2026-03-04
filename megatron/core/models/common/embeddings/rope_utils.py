@@ -88,7 +88,7 @@ def _rotate_half(x: Tensor, rotary_interleaved: bool) -> Tensor:
         x_new = torch.stack((-x2, x1), dim=-1)
         return x_new.view(x_new.shape[0], x_new.shape[1], x_new.shape[2], -1)
 
-
+counter = 0
 def _apply_rotary_pos_emb_bshd(
     t: Tensor,
     freqs: Tensor,
@@ -121,8 +121,17 @@ def _apply_rotary_pos_emb_bshd(
     # second part is sine component, need to change signs with _rotate_half method
     cos_ = (torch.cos(freqs) * mscale).to(t.dtype)
     sin_ = (torch.sin(freqs) * mscale).to(t.dtype)
-
+    global counter
+    tensor = ""
+    if counter == 0:
+        tensor = "q"
+    else:
+        tensor = "k"
+    torch.save(_rotate_half(t, rotary_interleaved).cpu(),f"/workspace/megatron-lm/mlm-tensors/rotate_half_tokens_{tensor}")
+    counter += 1
+    print(f"counter: {counter}, rotary_interleaved: {rotary_interleaved}")
     t = (t * cos_) + (_rotate_half(t, rotary_interleaved) * sin_)
+    print(f"mscale: {mscale}")
     return torch.cat((t, t_pass), dim=-1)
 
 
@@ -260,12 +269,13 @@ def apply_rotary_pos_emb(
     fused/unfused kernels, or bshd (conventional) / thd (packed seq) format
     """
     global fused_apply_rotary_pos_emb, fused_apply_rotary_pos_emb_thd
-
+    config.apply_rope_fusion = False
     # Keep for backward compatibility. Will deprecate in the future.
     if cp_group is None:
         cp_group = parallel_state.get_context_parallel_group()
 
     if config.apply_rope_fusion:
+        print("rope_fusion")
         if cu_seqlens is None:
             # NOTE: TE backends do not support mRoPE in bshd format when bs > 1.
             use_unfused = False
@@ -283,15 +293,18 @@ def apply_rotary_pos_emb(
                 )
                 use_unfused = True
             if not use_unfused:
+                print("fused_apply_rotary_pos_emb")
                 assert fused_apply_rotary_pos_emb is not None, "apply_rope_fusion is not available."
                 return fused_apply_rotary_pos_emb(t, freqs, interleaved=config.rotary_interleaved)
         else:
+            print("fused_apply_rotary_pos_emb_thd")
             assert fused_apply_rotary_pos_emb_thd is not None, "apply_rope_fusion is not available."
             return fused_apply_rotary_pos_emb_thd(
                 t, cu_seqlens, freqs, cp_size=cp_group.size(), cp_rank=cp_group.rank()
             )
     # use unfused implementation
     if cu_seqlens is None:
+        print("_apply_rotary_pos_emb_bshd")
         return _apply_rotary_pos_emb_bshd(
             t,
             freqs,
@@ -300,6 +313,7 @@ def apply_rotary_pos_emb(
             mscale=mscale,
         )
     else:
+        print("_apply_rotary_pos_emb_thd")
         return _apply_rotary_pos_emb_thd(
             t,
             cu_seqlens,

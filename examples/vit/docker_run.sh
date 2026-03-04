@@ -6,6 +6,7 @@ sudo docker run \
   --entrypoint bash \
   --workdir /workspace/megatron-lm \
   -v /home/jahatef/Documents/megatron-high-res/transformers:/workspace/transformers \
+  -v /home/jahatef/Documents/megatron-high-res/TransformerEngine:/workspace/TransformerEngine \
   -v /home/jahatef/Documents/megatron-high-res/pytorch-image-models:/workspace/pytorch-image-models \
   -v /home/jahatef/Documents/megatron-high-res/harvest-datasets/weed:/workspace/dataset \
   -v /home/jahatef/Documents/megatron-high-res/Megatron-LM:/workspace/megatron-lm \
