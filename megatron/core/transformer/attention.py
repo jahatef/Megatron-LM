@@ -913,10 +913,10 @@ class Attention(MegatronModule, ABC):
 
         """
         
-        torch.save(hidden_states.cpu(),"/workspace/megatron-lm/mlm-tensors/attention-inputs")
-        hidden_states = torch.load("/workspace/megatron-lm/hf-tensors/attention-inputs").to("cuda",dtype=torch.bfloat16).transpose(0,1)
-        cls_token, _, hidden_states = hidden_states.split((1, 4, 1024), dim=0)
-        hidden_states = torch.cat((cls_token, hidden_states), dim=0)
+        #torch.save(hidden_states.cpu(),"/workspace/megatron-lm/mlm-tensors/attention-inputs")
+        #hidden_states = torch.load("/workspace/megatron-lm/hf-tensors/attention-inputs").to("cuda",dtype=torch.bfloat16).transpose(0,1)
+        #cls_token, _, hidden_states = hidden_states.split((1, 4, 1024), dim=0)
+        #hidden_states = torch.cat((cls_token, hidden_states), dim=0)
         print(f"hidden_states at attention forward: {hidden_states.size()}")
 
         # Check if we need to skip RoPE
@@ -960,6 +960,7 @@ class Attention(MegatronModule, ABC):
         # Get the query, key and value tensors based on the type of attention -
         # self or cross attn.
         nvtx_range_push(suffix="qkv")
+        print(f"attention_type: {self.attention_type} ")
         split_qkv = (self.attention_type == "cross") or not all(
             [
                 not self.config.test_mode,
@@ -985,6 +986,7 @@ class Attention(MegatronModule, ABC):
             ), "fused_single_qkv_rope requested but not available/supported for the config."
 
         with off_interface(self.offload_qkv_linear, hidden_states, "qkv_linear") as hidden_states:
+            print("get_query_key_value_tensors")
             qkv_output = self.get_query_key_value_tensors(
                 hidden_states,
                 key_value_states,
@@ -1026,6 +1028,7 @@ class Attention(MegatronModule, ABC):
         # projection. This conditional is not used in the prefill phase or non-flash-decoding cases.
         nvtx_range_push(suffix="adjust_key_value")
         if in_decode_mode and self.config.flash_decode:
+            print("adjust_key_value")
             assert self.layer_number in inference_context.key_value_memory_dict
             assert inference_context.sequence_len_offset is not None
             inference_key_memory, inference_value_memory = inference_context.key_value_memory_dict[
@@ -1056,6 +1059,7 @@ class Attention(MegatronModule, ABC):
             raise ValueError(f"CUDA graphs must use flash decode with static batching!")
 
         if split_qkv:
+            print("_adjust_key_value_for_inference")
             query, key, value, rotary_pos_emb, attn_mask_type, block_table = (
                 self._adjust_key_value_for_inference(
                     inference_context,
@@ -1100,17 +1104,17 @@ class Attention(MegatronModule, ABC):
                 cu_seqlens_q = cu_seqlens_kv = None
 
             if split_qkv:
-                torch.save(query.cpu(),"/workspace/megatron-lm/mlm-tensors/query-rope-inputs")
-                torch.save(key.cpu(),"/workspace/megatron-lm/mlm-tensors/key-rope-inputs")
-                query = torch.load("/workspace/megatron-lm/hf-tensors/query-rope-inputs").to("cuda",dtype=torch.bfloat16).transpose(0,2).transpose(1,2)
-                print(f"hf query size at mlm rope: {query.size()}")
-                key = torch.load("/workspace/megatron-lm/hf-tensors/key-rope-inputs").to("cuda",dtype=torch.bfloat16).transpose(0, 2).transpose(1,2)
+                #torch.save(query.cpu(),"/workspace/megatron-lm/mlm-tensors/query-rope-inputs")
+                #torch.save(key.cpu(),"/workspace/megatron-lm/mlm-tensors/key-rope-inputs")
+                #query = torch.load("/workspace/megatron-lm/hf-tensors/query-rope-inputs").to("cuda",dtype=torch.bfloat16).transpose(0,2).transpose(1,2)
+                #print(f"hf query size at mlm rope: {query.size()}")
+                #key = torch.load("/workspace/megatron-lm/hf-tensors/key-rope-inputs").to("cuda",dtype=torch.bfloat16).transpose(0, 2).transpose(1,2)
                 
                 num_prefix_tokens = self.config.num_prefix_tokens
                 num_pos_tokens = hidden_states.size()[0] - num_prefix_tokens
                 print(f"\n\nquery shape: {query.size()}, num_prefix_tokens: {num_prefix_tokens}, num_pos_tokens: {num_pos_tokens}\n\n")
-                q_prefix_token, _, query = query.split((num_prefix_tokens, 4,num_pos_tokens), dim=0)
-                k_prefix_token, _, key = key.split((num_prefix_tokens, 4,num_pos_tokens), dim=0)
+                q_prefix_token,  query = query.split((num_prefix_tokens, num_pos_tokens), dim=0)
+                k_prefix_token,  key = key.split((num_prefix_tokens, num_pos_tokens), dim=0)
                 print(f"query shape after split: {query.size()}, pos_emb size: {q_pos_emb.size()}")
                 if q_pos_emb is not None:
                     # TODO VIJAY: simplify
@@ -1237,8 +1241,8 @@ class Attention(MegatronModule, ABC):
                 output, name="attn_proj", forced_released_tensors=[core_attn_out]
             )
         nvtx_range_pop(suffix="linear_proj")
-        torch.save(output.cpu(),"/workspace/megatron-lm/mlm-tensors/attention-output")
-        assert False
+        #torch.save(output.cpu(),"/workspace/megatron-lm/mlm-tensors/attention-output")
+        #assert False
         return output, bias
 
     @jit_fuser

@@ -14,7 +14,7 @@ sudo docker run \
   megatron:latest
 
 PYTORCH_IMAGE=nvcr.io/nvidia/pytorch:24.01-py3
-CHECKPOINT_PATH="/workspace/checkpoints" 
+CHECKPOINT_PATH="/workspace/megatron-lm/checkpoints" 
 TENSORBOARD_LOGS_PATH="/workspace/megatron-lm/logs" #<Specify path>
 VOCAB_FILE="/workspace/data/gpt2-vocab.json"
 MERGE_FILE="/workspace/data/gpt2-merges.txt"

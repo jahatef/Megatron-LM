@@ -29,13 +29,14 @@ DISTRIBUTED_ARGS=(
 )
 
 GPT_MODEL_ARGS=(
-    --num-layers 16 
-    --hidden-size 384 
-    --num-attention-heads 6 
-    --seq-length 8192 
-    --max-position-embeddings 8192 
+    --num-layers 12
+    --hidden-size 768
+    --num-attention-heads 12
+    --seq-length 196 
+    --max-position-embeddings 196 
     --position-embedding-type rope
-    --img-size 512 \
+    --rotary-base 1000000
+    --img-size 224 \
     --patch-dim 16 \
     --attention-backend flash # Can use (flash/fused/unfused/local)
     --transformer-impl transformer_engine
@@ -44,7 +45,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     --micro-batch-size 1 
     --global-batch-size 1
-    --train-iters 20 
+    --train-iters 200 
     --weight-decay 0.1 
     --adam-beta1 0.9 
     --adam-beta2 0.95 
@@ -77,7 +78,7 @@ DATA_ARGS=(
     --num-classes 4
 )
 
-EVAL_AND_LOGGING_ARGS=(
+EVAL_AND_LOGGING_ARGS=( 
     --log-interval 1
     --save-interval 10000 
     --eval-interval 10 
@@ -87,13 +88,14 @@ EVAL_AND_LOGGING_ARGS=(
     --tensorboard-dir $TENSORBOARD_LOGS_PATH 
     --log-throughput
     --log-params-norm
+    --timing-log-level 0
     --wandb-project vit-synth-rope-experiments
     --wandb-exp-name test
 )
 
 
-rm -rf $CHECKPOINT_PATH/*
-rm -rf $TENSORBOARD_LOGS_PATH/*
+#rm -rf $CHECKPOINT_PATH/*
+#rm -rf $TENSORBOARD_LOGS_PATH/*
 torchrun ${DISTRIBUTED_ARGS[@]} pretrain_vision.py \
     ${GPT_MODEL_ARGS[@]} \
     ${TRAINING_ARGS[@]} \

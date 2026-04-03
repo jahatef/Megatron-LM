@@ -30,7 +30,7 @@ from megatron.core.utils import deprecate_inference_params, internal_api
 logger = logging.getLogger(__name__)
 
 
-__all__ = ['RotaryEmbedding', 'MultimodalRotaryEmbedding','RotaryEmbeddingDinoV3']
+__all__ = ['RotaryEmbedding', 'MultimodalRotaryEmbedding','RotaryEmbeddingDinoV3',"RotaryEmbeddingViT"]
 
 
 class RotaryEmbedding(nn.Module):
@@ -372,6 +372,7 @@ class RotaryEmbeddingDinoV3(nn.Module):
         temperature: float = 100.0,
         normalize_coords: str = "separate",
         rotate_half: bool = True,
+        rope_impl: str = "base",
     ) -> None:
         super().__init__()
 
@@ -379,35 +380,51 @@ class RotaryEmbeddingDinoV3(nn.Module):
         self.rotate_half = rotate_half
         self.temperature = float(temperature)
         self.normalize_coords = normalize_coords
+        self.rope_impl = rope_impl
+        print("self.rope_impl: ", self.rope_impl)
         print(f"\ndim at rope: {self.dim}\n")
 
+        print(f"\n\nbase frequency: {self.temperature}, self.dim: {self.dim}")
         inv_freq = 1/self.temperature ** torch.arange(0, 1, 4/self.dim, dtype=torch.float32)
-        
 
+        print(f"inv_freq device: {inv_freq.device}\n")
+        #torch.save(inv_freq.cpu(), "/workspace/megatron-lm/mlm-tensors/periods_init")
         self.register_buffer("periods", inv_freq, persistent=False)
-        print(f"\nperiods size: {self.periods.size()}\n")
+        print(f"\nperiods size: {self.periods.size()}, dtype: {self.periods.dtype}, device: {self.periods.device}\n")
 
 
+    def build_coords(self, H, W, device):
+        if self.rope_impl == "base":
+            return self._build_coords(H, W, device)
+        #elif self.rope_impl == "hilbert":
+        #    return self._build_coords_hilbert_curve(H, W, device)
+        #elif self.rope_impl == "mixed_axis":
+        #    return self._build_coords_mixed_axis(H, W, device)
+        else:
+            raise ValueError(f"Unknown rope_impl: {self.rope_impl}")
+        
     def _build_coords(self, H: int, W: int, device) -> Tensor:
         y, x = torch.meshgrid(
             torch.arange(H, device=device),
             torch.arange(W, device=device),
             indexing="ij",
         )
-
+        print("\n\n",x,"\n\n",y,"\n\n")
         y = (y + 0.5) / H * 2 - 1
         x = (x + 0.5) / W * 2 - 1
-
+        print("\n\n",x,"\n\n",y,"\n\n")
         coords = torch.stack([y, x], dim=-1)
+        print(f"\n\n { coords} \n\n")
         return coords.view(-1, 2)
-
+    
     def get_embed(self, H: int, W: int, device) -> Tensor:
-        coords = self._build_coords(H, W, device)
-
+        self.build_coords(H,W,device)
+        print(f"\nperiods size: {self.periods.size()}, dtype: {self.periods.dtype}, device: {self.periods.device}\n")
         coords = coords[:, :, None]
-        torch.save(coords.cpu(), "/workspace/megatron-lm/mlm-tensors/coords")
-        torch.save(self.periods.cpu(), "/workspace/megatron-lm/mlm-tensors/periods")
-        self.periods = torch.load("/workspace/megatron-lm/mlm-tensors/periods")
+        #torch.save(coords.cpu(), "/workspace/megatron-lm/mlm-tensors/coords")
+        #torch.save(self.periods.cpu(), "/workspace/megatron-lm/mlm-tensors/periods")
+        #self.periods = torch.load("/workspace/megatron-lm/hf-tensors/periods").to("cuda",dtype)
+        print(f"\nperiods size: {self.periods.size()}, dtype: {self.periods.dtype}, device: {self.periods.device}\n")
         angles = 2 * math.pi * coords * self.periods[None, None, :].to(device)
         print(f"\nangles size: {angles.size()}\n")
 
@@ -423,13 +440,250 @@ class RotaryEmbeddingDinoV3(nn.Module):
 
         emb = torch.cat([sin, cos], dim=-1)
         print(f"\n\n embed size: {emb.size()}\n\n")
-        torch.save(emb.cpu(),"/workspace/megatron-lm/mlm-tensors/cos_sin_cat_emb")
-        torch.save(angles.cpu(), "/workspace/megatron-lm/mlm-tensors/angles")
+        #torch.save(emb.cpu(),"/workspace/megatron-lm/mlm-tensors/cos_sin_cat_emb")
+        #torch.save(angles.cpu(), "/workspace/megatron-lm/mlm-tensors/angles")
 
         # Megatron expects [seq, 1, 1, dim]
         return angles[:, None, None, :] #cos[:, None, None, :], sin[:, None, None, :]
 
     def forward(self, seq_len: int, H: int, W: int, device=None) -> Tensor:
+        if device is None:
+            device = self.periods.device
+
+        return self.get_embed(H, W, device)
+
+class RotaryEmbeddingViT(nn.Module):
+    """
+    Axial / Hilbert / Mixed-axis RoPE numerics matching DINOv3-style ViTs.
+
+    Produces rotation angles only (Megatron-compatible).
+
+    Output shape:
+        [seq, 1, 1, dim]
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        temperature: float = 100.0,
+        normalize_coords: str = "separate",
+        rotate_half: bool = True,
+        rope_impl: str = "base",
+    ):
+        super().__init__()
+
+        assert dim % 4 == 0, "RoPE dim must be divisible by 4"
+
+        self.dim = dim
+        self.temperature = temperature
+        self.rotate_half = rotate_half
+        self.normalize_coords = normalize_coords
+        self.rope_impl = rope_impl
+
+        # number of base frequencies
+        self.num_freq = dim // 4
+
+        inv_freq = 1 / (
+            temperature
+            ** torch.arange(
+                0,
+                self.num_freq,
+                dtype=torch.float32,
+            )
+        )
+
+        self.register_buffer("periods", inv_freq, persistent=False)
+
+    ########################################################
+    # coordinate builders
+    ########################################################
+
+    def build_coords(self, H, W, device):
+
+        if self.rope_impl == "base":
+            return self._build_coords_axial(H, W, device)
+
+        elif self.rope_impl == "hilbert":
+            return self._build_coords_hilbert(H, W, device)
+
+        elif self.rope_impl == "mixed_axis":
+            return self._build_coords_mixed_axis(H, W, device)
+
+        else:
+            raise ValueError(f"Unknown rope_impl: {self.rope_impl}")
+
+    ########################################################
+    # axial (DINOv3 default)
+    ########################################################
+
+    def _build_coords_axial(self, H, W, device):
+
+        y, x = torch.meshgrid(
+            torch.arange(H, device=device),
+            torch.arange(W, device=device),
+            indexing="ij",
+        )
+
+        y = (y + 0.5) / H * 2 - 1
+        x = (x + 0.5) / W * 2 - 1
+
+        coords = torch.stack([y, x], dim=-1)
+
+        return coords.view(-1, 2)
+
+    ########################################################
+    # hilbert traversal ordering
+    ########################################################
+
+    def _build_coords_hilbert(self, H, W, device):
+
+        coords = self._build_coords_axial(H, W, device)
+
+        def next_pow2(x):
+            return 1 << (x - 1).bit_length()
+
+        def hilbert_xy(index, order):
+
+            x = 0
+            y = 0
+            t = index
+
+            s = 1
+
+            while s < (1 << order):
+
+                rx = 1 & (t // 2)
+                ry = 1 & (t ^ rx)
+
+                if ry == 0:
+                    if rx == 1:
+                        x = s - 1 - x
+                        y = s - 1 - y
+
+                    x, y = y, x
+
+                x += s * rx
+                y += s * ry
+
+                t //= 4
+                s *= 2
+
+            return x, y
+
+        import math
+
+        padded = next_pow2(max(H, W))
+        order = int(math.log2(padded))
+
+        order_list = []
+
+        for i in range(padded * padded):
+
+            x, y = hilbert_xy(i, order)
+
+            if x < W and y < H:
+                order_list.append(y * W + x)
+
+            if len(order_list) == H * W:
+                break
+
+        order_tensor = torch.tensor(order_list, device=device)
+
+        return coords[order_tensor]
+
+    ########################################################
+    # mixed-axis rope
+    ########################################################
+
+    def _build_coords_mixed_axis(self, H, W, device):
+
+        y, x = torch.meshgrid(
+            torch.arange(H, device=device),
+            torch.arange(W, device=device),
+            indexing="ij",
+        )
+
+        y = (y + 0.5) / H * 2 - 1
+        x = (x + 0.5) / W * 2 - 1
+
+        coords = torch.stack([y, x], dim=-1).view(-1, 2)
+
+        theta = torch.linspace(
+            0,
+            math.pi,
+            steps=self.num_freq,
+            device=device,
+        )
+
+        alpha = torch.cos(theta)
+        beta = torch.sin(theta)
+
+        directions = torch.stack([beta, alpha], dim=-1)
+
+        return coords @ directions.T
+
+    ########################################################
+    # embedding generator
+    ########################################################
+
+    def get_embed(self, H, W, device):
+
+        coords = self.build_coords(H, W, device)
+
+        ####################################################
+        # axial / hilbert case
+        ####################################################
+
+        if coords.shape[-1] == 2:
+
+            coords = coords[:, :, None]
+
+            angles = (
+                2
+                * math.pi
+                * coords
+                * self.periods[None, None, :]
+            )
+
+            angles = angles.flatten(1, 2)
+
+        ####################################################
+        # mixed-axis case
+        ####################################################
+
+        else:
+
+            angles = (
+                2
+                * math.pi
+                * coords
+                * self.periods[None, :]
+            )
+
+        ####################################################
+        # match rotary layout
+        ####################################################
+
+        if self.rotate_half:
+            angles = torch.cat([angles, angles], dim=-1)
+
+        else:
+            angles = torch.repeat_interleave(
+                angles,
+                2,
+                dim=-1,
+            )
+
+        ####################################################
+        # output format expected by Megatron
+        ####################################################
+
+        return angles[:, None, None, :]
+
+    ########################################################
+
+    def forward(self, seq_len, H, W, device=None):
+
         if device is None:
             device = self.periods.device
 
