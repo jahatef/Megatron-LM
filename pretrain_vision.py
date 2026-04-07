@@ -69,7 +69,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         self.cls_token = torch.nn.Parameter(torch.zeros(1, 1, self.hidden_size))
 
         # Position embedding
-        if self.pos_embed_type == "absolute":
+        if self.pos_embed_type == "learned_absolute":
             self.pos_embed = torch.nn.Parameter(
                 torch.zeros(1, self.num_patches + 1, self.hidden_size)
             )
@@ -92,13 +92,12 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         
         # Precompute RoPE cache
         if self.pos_embed_type == "rope":
+            with open("transformer_config.txt", 'w') as f:
+                print(config, file=f)
             self.rotary_emb = RotaryEmbeddingDinoV3(
-                dim=self.hidden_size // config.num_attention_heads
+                dim=self.hidden_size // config.num_attention_heads,
+                temperature = 100.0 # config.rotary_base
             )
-            '''self.rotary_emb = RotaryEmbedding(
-                kv_channels = self.config.kv_channels,
-                rotary_percent=1
-            )'''
         else:
             self.rotary_emb = None
 
@@ -125,7 +124,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
 
         # Patchify
         x = self.patch_embed(images)               # [B, C, H', W']
-        print(f"\n\nx size: {x.size()}\n\n")
+        #print(f"\n\nx size: {x.size()}\n\n")
         x = x.flatten(2).transpose(1, 2)           # [B, N, D]
 
         # Add CLS token
@@ -163,9 +162,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
             device=x.device,
             dtype=torch.bool,
         )
-        if rotary_pos_emb is not None:
-            pass #rotary_pos_emb = rotary_pos_emb[1:]  # remove CLS position
-        print(f"\n\npos_emb: {rotary_pos_emb.size()}, x: {x.size()}\n\n")
+        print(f"input size: {x.size()}")
         x = self.encoder(
             x,
             attention_mask=attention_mask,

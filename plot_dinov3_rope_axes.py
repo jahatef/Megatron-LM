@@ -2,7 +2,7 @@ import os
 import torch
 import matplotlib.pyplot as plt
 
-from megatron.core.models.common.embeddings import RotaryEmbeddingDinoV3, RotaryEmbeddingViT
+from megatron.core.models.common.embeddings import RotaryEmbeddingAxial, RotaryEmbeddingViT, RotaryEmbeddingMixedAxis, RotaryEmbeddingHilbert
 
 
 FIGURES_DIR = "figures"
@@ -23,7 +23,8 @@ def extract_channel_maps(rope, H, W, device="cpu"):
         [H, W, num_channels]
     """
 
-    coords = rope.build_coords(H, W, device)
+    '''coords = rope.build_coords(H, W, device)
+    print(coords.)
     coords = coords[:, :, None]
 
     periods = rope.periods[None, None, :].to(device)
@@ -32,7 +33,9 @@ def extract_channel_maps(rope, H, W, device="cpu"):
 
     # flatten axis dimension into channel dimension
     angles = angles.flatten(1, 2)
-
+    '''
+    angles = rope(H,W, device=device)
+    print(angles)
     return angles.reshape(H, W, -1)
 
 
@@ -83,7 +86,7 @@ def plot_channel_maps(
             image = channel_maps[:, :, ch]
 
         plt.imshow(
-            image.cpu(),
+            image.detach().cpu().numpy(),
             #vmin=vmin,
             #vmax=vmax,
         )
@@ -114,7 +117,7 @@ def plot_frequency_growth(channel_maps, show=True):
 
     ensure_output_dir()
 
-    magnitude = channel_maps.std(dim=(0, 1)).cpu()
+    magnitude = channel_maps.std(dim=(0, 1)).detach().cpu()
 
     plt.figure()
 
@@ -142,11 +145,11 @@ def plot_frequency_growth(channel_maps, show=True):
 
 def main():
 
-    H = 8
-    W = 8
+    H = 64
+    W = 64
     DIM = 64
 
-    rope = RotaryEmbeddingViT(dim=DIM, rope_impl="hilbert",temperature=100)
+    rope = RotaryEmbeddingViT(dim=DIM, num_heads= 16, temperature=100,rope_impl="mixed_polar")
 
     channel_maps = extract_channel_maps(
         rope,
