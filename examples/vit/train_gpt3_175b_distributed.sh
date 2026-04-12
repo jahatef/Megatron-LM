@@ -35,7 +35,6 @@ GPT_MODEL_ARGS=(
     --seq-length 196 
     --max-position-embeddings 196 
     --position-embedding-type rope
-    --vit-rotary-base 100,150,200,250,300,350,400,450,500,550,600,650
     --img-size 224 \
     --patch-dim 16 \
     --attention-backend flash # Can use (flash/fused/unfused/local)
