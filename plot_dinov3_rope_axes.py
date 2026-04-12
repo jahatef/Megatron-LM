@@ -79,6 +79,7 @@ def plot_channel_maps(
     for ch in range(num_channels):
 
         plt.figure(figsize=(4, 4))
+        print(channel_maps.size())
 
         if plot_sine:
             image = torch.sin(channel_maps[:, :, ch])
@@ -145,11 +146,13 @@ def plot_frequency_growth(channel_maps, show=True):
 
 def main():
 
-    H = 256
-    W = 256
+    H = 64
+    W = 64
     DIM = 64
 
-    rope = RotaryEmbeddingViT(dim=DIM, num_heads=16,rope_impl="hilbert")
+    #rope = RotaryEmbeddingViT(dim=DIM, num_heads=12,rotary_base=torch.tensor([1,4,6,4,3,6,78,4,3,54,9,19])*100, rope_impl="axial")
+    rope = RotaryEmbeddingViT(dim=DIM, num_heads=12,rotary_base=None, rope_impl="hilbert")
+
 
     channel_maps = extract_channel_maps(
         rope,

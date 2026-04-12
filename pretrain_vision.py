@@ -15,7 +15,7 @@ from megatron.core.models.vision.vit_layer_specs import (
     get_vit_layer_with_local_spec,
     get_vit_layer_with_transformer_engine_spec,
 )
-from megatron.core.models.common.embeddings import RotaryEmbeddingDinoV3, RotaryEmbedding
+from megatron.core.models.common.embeddings import RotaryEmbeddingViT
 
 from megatron.training import (
     get_args,
@@ -52,9 +52,9 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         self.patch_size = args.patch_dim
         self.img_h = args.img_size
         self.img_w = args.img_size
-        print(f"\n\nheight:{self.img_h}, width:{self.img_w}\n\n")
+        self.rotary_base = args.vit_rotary_base
+        self.rope_impl = args.vit_rope_impl
         self.num_patches = (self.img_h // self.patch_size) * (self.img_w // self.patch_size)
-        print(f"\n\npatch size: {self.patch_size}\n\n")
 
         # Patch embedding
         self.patch_embed = torch.nn.Conv2d(
@@ -92,11 +92,11 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         
         # Precompute RoPE cache
         if self.pos_embed_type == "rope":
-            with open("transformer_config.txt", 'w') as f:
-                print(config, file=f)
-            self.rotary_emb = RotaryEmbeddingDinoV3(
+            self.rotary_emb = RotaryEmbeddingViT(
                 dim=self.hidden_size // config.num_attention_heads,
-                temperature = 100.0 # config.rotary_base
+                num_heads=config.num_attention_heads,
+                rotary_base = self.rotary_base,
+                rope_impl = self.rope_impl,
             )
         else:
             self.rotary_emb = None
@@ -144,13 +144,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         rotary_pos_emb = None
 
         if self.rotary_emb is not None:
-            head_dim = self.hidden_size // self.config.num_attention_heads
-            '''rotary_pos_emb = self.rotary_emb(
-                max_seq_len=seq_len
-            )
-            '''
             rotary_pos_emb = self.rotary_emb(
-                seq_len=seq_len,
                 H=self.img_h // self.patch_size,
                 W=self.img_w // self.patch_size,
                 device=x.device,
