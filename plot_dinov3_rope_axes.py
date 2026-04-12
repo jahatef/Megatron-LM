@@ -35,7 +35,7 @@ def extract_channel_maps(rope, H, W, device="cpu"):
     angles = angles.flatten(1, 2)
     '''
     angles = rope(H,W, device=device)
-    print(angles)
+    print(angles.size())
     return angles.reshape(H, W, -1)
 
 
@@ -145,11 +145,11 @@ def plot_frequency_growth(channel_maps, show=True):
 
 def main():
 
-    H = 64
-    W = 64
+    H = 256
+    W = 256
     DIM = 64
 
-    rope = RotaryEmbeddingViT(dim=DIM, num_heads= 16, temperature=100,rope_impl="mixed_polar")
+    rope = RotaryEmbeddingViT(dim=DIM, num_heads=16,rope_impl="hilbert")
 
     channel_maps = extract_channel_maps(
         rope,
@@ -157,13 +157,14 @@ def main():
         W,
         device="cpu",
     )
+    print(channel_maps.size())
 
     print("Plotting per-channel spatial frequencies 📊")
 
     plot_channel_maps(
         channel_maps,
         num_channels=32,
-        plot_sine=False,  # change to True to visualize actual rotary carrier
+        plot_sine=True,  # change to True to visualize actual rotary carrier
     )
 
     print("Plotting frequency growth curve 📈")

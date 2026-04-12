@@ -359,6 +359,105 @@ class MultimodalRotaryEmbedding(nn.Module):
             emb = get_pos_emb_on_this_cp_rank(emb, 0, cp_group)
         return emb
 
+def _init_rotary_base(module, rotary_base, num_heads, axes=2):
+    """
+    Initializes rotary_base consistently across RoPE variants.
+
+    axes=1  → axial / polar
+    axes=2  → mixed-axis variants
+
+    Supports:
+
+        rotary_base=None
+        len=1
+        len=num_heads
+        len=axes
+        len=num_heads*axes
+    """
+
+    if rotary_base is None:
+
+        module.rotary_base = nn.Parameter(
+            torch.ones(num_heads, axes)
+        )
+
+        module.freq_mode = "learned"
+
+        return
+
+    rotary_base = torch.tensor(rotary_base, dtype=torch.float32)
+
+    ########################################################
+    # shared scalar
+    ########################################################
+
+    if rotary_base.numel() == 1:
+
+        module.register_buffer(
+            "rotary_base",
+            rotary_base.repeat(num_heads, axes),
+            persistent=False,
+        )
+
+        module.freq_mode = "shared"
+
+        return
+
+    ########################################################
+    # shared per-axis
+    ########################################################
+
+    if rotary_base.numel() == axes:
+
+        module.register_buffer(
+            "rotary_base",
+            rotary_base.repeat(num_heads, 1),
+            persistent=False,
+        )
+
+        module.freq_mode = "shared_axis"
+
+        return
+
+    ########################################################
+    # per-head scalar
+    ########################################################
+
+    if rotary_base.numel() == num_heads:
+        print(rotary_base)
+
+        module.register_buffer(
+            "rotary_base",
+            rotary_base[:, None].repeat(1, axes),
+            persistent=False,
+        )
+        print(module.rotary_base)
+
+        module.freq_mode = "handpicked"
+
+        return
+
+    ########################################################
+    # per-head per-axis
+    ########################################################
+
+    if rotary_base.numel() == num_heads * axes:
+        print(rotary_base)
+        module.register_buffer(
+            "rotary_base",
+            rotary_base.view(num_heads, axes),
+            persistent=False,
+        )
+        print(module.rotary_base)
+        
+        module.freq_mode = "handpicked_axis"
+
+        return
+
+    raise ValueError(
+        "Invalid rotary_base length for given axes/head config"
+    )
+        
 class RotaryEmbeddingAxial(nn.Module):
     """Axial RoPE numerics matching DINOv3 for Vision Transformers.
 
@@ -369,7 +468,7 @@ class RotaryEmbeddingAxial(nn.Module):
     def __init__(
         self,
         dim: int,
-        temperature: float = 100.0,
+        temperature: float = 10.0,
         normalize_coords: str = "separate",
         rotate_half: bool = True
     ) -> None:
@@ -395,7 +494,8 @@ class RotaryEmbeddingAxial(nn.Module):
         return coords.view(-1, 2)
     
     def get_embed(self, H: int, W: int, device) -> Tensor:
-        coords = coords[:, :, None]
+        coords = self._build_coords(H,W,device)
+        coords= coords[:, :, None]
         angles = 2 * math.pi * coords * self.periods[None, None, :].to(device)
         
         angles = angles.flatten(1,2)
