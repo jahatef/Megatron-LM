@@ -168,7 +168,6 @@ def custom_backward(output, grad_output):
     grad have the same shape, while C++'s 'backward' does not.
     '''
 
-    #print(f"\n\noutput.numel: {output.numel()} \n \n {output}\n\n")
     assert output.numel() == 1, "output should be pseudo-'freed' in schedule, to optimize memory"
     assert isinstance(output, torch.Tensor), "output == '%s'." % type(output).__name__
     assert isinstance(grad_output, (torch.Tensor, type(None))), (
@@ -248,9 +247,7 @@ def forward_step_calc_loss(
         if loss_func is None:
             forward_data_store.append(output_tensor)
         elif not collect_non_loss_data:
-            #print(f"\n\n\n outputs before loss: {output_tensor}")
             outputs = loss_func(output_tensor)
-            #print(f"\n\n\n outputs after loss: {outputs}")
             if len(outputs) == 3:
                 output_tensor, num_tokens, loss_reduced = outputs
                 if not config.calculate_per_token_loss:

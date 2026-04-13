@@ -35,6 +35,9 @@ GPT_MODEL_ARGS=(
     --seq-length 196 
     --max-position-embeddings 196 
     --position-embedding-type rope
+    --vit-rope-impl hilbert
+    #--vit-rotary-base "10,20,30,40,50,60,70,80,90,100,110,120" \
+    --vit-rotary-base 10
     --img-size 224 \
     --patch-dim 16 \
     --attention-backend flash # Can use (flash/fused/unfused/local)

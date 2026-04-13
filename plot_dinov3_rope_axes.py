@@ -35,8 +35,8 @@ def extract_channel_maps(rope, H, W, device="cpu"):
     angles = angles.flatten(1, 2)
     '''
     angles = rope(H,W, device=device)
-    print(angles.size())
-    return angles.reshape(H, W, -1)
+    print("angles size. " ,angles.size())
+    return angles.reshape(H, W, angles.size()[2],angles.size()[3])
 
 
 def compute_global_color_range(channel_maps, num_channels, plot_sine):
@@ -60,6 +60,7 @@ def compute_global_color_range(channel_maps, num_channels, plot_sine):
 def plot_channel_maps(
     channel_maps,
     num_channels=12,
+    num_heads=12,
     show=True,
     plot_sine=False,
 ):
@@ -76,38 +77,39 @@ def plot_channel_maps(
         plot_sine,
     )
 
-    for ch in range(num_channels):
+    for head in range(num_heads):
+        for ch in range(num_channels):
 
-        plt.figure(figsize=(4, 4))
-        print(channel_maps.size())
+            plt.figure(figsize=(4, 4))
+            print(channel_maps.size())
 
-        if plot_sine:
-            image = torch.sin(channel_maps[:, :, ch])
-        else:
-            image = channel_maps[:, :, ch]
+            if plot_sine:
+                image = torch.sin(channel_maps[:, :, head, ch])
+            else:
+                image = channel_maps[:, :, ch]
 
-        plt.imshow(
-            image.detach().cpu().numpy(),
-            #vmin=vmin,
-            #vmax=vmax,
-        )
+            plt.imshow(
+                image.detach().cpu().numpy(),
+                #vmin=vmin,
+                #vmax=vmax,
+            )
 
-        plt.title(f"RoPE frequency channel {ch}")
+            plt.title(f"RoPE frequency channel {ch}")
 
-        plt.colorbar()
+            plt.colorbar()
 
-        plt.tight_layout()
+            plt.tight_layout()
 
-        filename = f"{FIGURES_DIR}/channel_{ch}.png"
+            filename = f"{FIGURES_DIR}/head_{head}_channel_{ch}.png"
 
-        plt.savefig(filename, dpi=200)
+            plt.savefig(filename, dpi=200)
 
-        print(f"Saved: {filename}")
+            print(f"Saved: {filename}")
 
-        if show:
-            plt.show()
+            if show:
+                plt.show()
 
-        plt.close()
+            plt.close()
 
 
 def plot_frequency_growth(channel_maps, show=True):
@@ -146,12 +148,12 @@ def plot_frequency_growth(channel_maps, show=True):
 
 def main():
 
-    H = 64
-    W = 64
+    H = 14
+    W = 14
     DIM = 64
-
+    num_heads=12
     #rope = RotaryEmbeddingViT(dim=DIM, num_heads=12,rotary_base=torch.tensor([1,4,6,4,3,6,78,4,3,54,9,19])*100, rope_impl="axial")
-    rope = RotaryEmbeddingViT(dim=DIM, num_heads=12,rotary_base=None, rope_impl="hilbert")
+    rope = RotaryEmbeddingViT(dim=DIM, num_heads=num_heads,rotary_base=1, rope_impl="mixed_polar")
 
 
     channel_maps = extract_channel_maps(
@@ -163,10 +165,12 @@ def main():
     print(channel_maps.size())
 
     print("Plotting per-channel spatial frequencies 📊")
-
+    channel_maps = torch.load("angles.pt").resize(H,W,12,64)
+    print(channel_maps.size())
     plot_channel_maps(
         channel_maps,
         num_channels=32,
+        num_heads=num_heads,
         plot_sine=True,  # change to True to visualize actual rotary carrier
     )
 

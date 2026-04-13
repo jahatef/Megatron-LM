@@ -161,7 +161,6 @@ class RotaryEmbedding(nn.Module):
             # move `inv_freq` to GPU once at the first micro-batch forward pass
             self.inv_freq = self.inv_freq.to(device=torch.cuda.current_device())
         freqs = self.get_freqs_non_repeated(max_seq_len, offset)
-        print(f"freqs size: {freqs.size()}")
         # first part even vector components, second part odd vector components,
         #  2 * dim in dimension size
         if not self.rotary_interleaved:
@@ -171,7 +170,6 @@ class RotaryEmbedding(nn.Module):
                 freqs.shape[0], -1
             )
         # emb [seq_length, .., dim]
-        print(f"emb size: {emb.size()}")
         emb = emb[:, None, None, :]
         return emb
 
@@ -203,7 +201,6 @@ class RotaryEmbedding(nn.Module):
             # slice rotary_pos_emb along sequence dimension
             # and select the parition of the current CP rank
             emb = get_pos_emb_on_this_cp_rank(emb, 0, cp_group)
-        print(f"\nemb at forward return: {emb.size()}\n")
         return emb
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
@@ -424,14 +421,11 @@ def _init_rotary_base(module, rotary_base, num_heads, axes=2):
     ########################################################
 
     if rotary_base.numel() == num_heads:
-        print(rotary_base)
-
         module.register_buffer(
             "rotary_base",
             rotary_base[:, None].repeat(1, axes),
             persistent=False,
         )
-        print(module.rotary_base)
 
         module.freq_mode = "handpicked"
 
@@ -442,13 +436,11 @@ def _init_rotary_base(module, rotary_base, num_heads, axes=2):
     ########################################################
 
     if rotary_base.numel() == num_heads * axes:
-        print(rotary_base)
         module.register_buffer(
             "rotary_base",
             rotary_base.view(num_heads, axes),
             persistent=False,
         )
-        print(module.rotary_base)
         
         module.freq_mode = "handpicked_axis"
 
@@ -478,11 +470,17 @@ class RotaryEmbeddingAxial(nn.Module):
         self.dim = dim
         self.rotate_half = rotate_half
         self.axes = 1
-        self.rotary_base = self._init_rotary_base(num_heads=num_heads, rotary_base=rotary_base, axes=self.axes)
+        self.rotary_base = self._init_rotary_base(
+            num_heads=num_heads, 
+            rotary_base=rotary_base, 
+            axes=self.axes)
+        
         self.normalize_coords = normalize_coords
-        inv_freq = 1/self.rotary_base ** torch.arange(0, 1, 4/self.dim, dtype=torch.float32)
 
-        self.register_buffer("periods", inv_freq, persistent=False)
+    def _get_periods(self, device):
+        return 1/(self.rotary_base.to(device) ** 
+                  torch.arange(0, 1, 4/self.dim, dtype=torch.float32,device=device))
+
 
     def _init_rotary_base(self, num_heads, rotary_base, axes):
         if rotary_base is None:
@@ -496,10 +494,10 @@ class RotaryEmbeddingAxial(nn.Module):
         assert rotary_base.numel() == 1 or len(rotary_base) == num_heads, f"num_heads, rotary_base must be size 1 or size num_heads, instead got size {len(rotary_base)}"
         if rotary_base.numel() == 1:
             rotary_base = rotary_base.repeat(num_heads, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
         else:
             rotary_base = rotary_base[:, None].repeat(1, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
             
 
     def _build_coords(self, H: int, W: int, device) -> Tensor:
@@ -515,6 +513,7 @@ class RotaryEmbeddingAxial(nn.Module):
     
     def get_embed(self, H: int, W: int, device) -> Tensor:
         coords = self._build_coords(H,W,device)
+        self.periods = self._get_periods(device)
         coords= coords[:, :, None, None]
 
         angles = 2 * math.pi * coords * self.periods[None, None, :,:].to(device)
@@ -555,6 +554,9 @@ class RotaryEmbeddingMixedAxis(nn.Module):
         self.num_heads = num_heads
         self.rotate_half = rotate_half
         self.axes = 1
+        learned_thetas = False
+        if rotary_base is None:
+            learned_thetas = True
         self.rotary_base = self._init_rotary_base(num_heads, rotary_base, self.axes)
 
 
@@ -572,20 +574,23 @@ class RotaryEmbeddingMixedAxis(nn.Module):
             alpha = torch.rand(1) * 2 * math.pi
 
             fx = torch.cat([
-                mag[i] * torch.cos(alpha),
-                mag[i] * torch.cos(math.pi/2 + alpha)
+                mag[i,:] * torch.cos(alpha),
+                mag[i,:] * torch.cos(math.pi/2 + alpha)
             ])
 
             fy = torch.cat([
-                mag[i] * torch.sin(alpha),
-                mag[i] * torch.sin(math.pi/2 + alpha)
+                mag[i,:] * torch.sin(alpha),
+                mag[i,:] * torch.sin(math.pi/2 + alpha)
             ])
 
             freqs.append(torch.stack([fx, fy], dim=0))
 
         freqs = torch.stack(freqs, dim=0)
 
-        self.freqs = nn.Parameter(freqs)
+        if learned_thetas:
+            self.freqs = nn.Parameter(freqs)
+        else:
+            self.freqs = freqs
 
     def _init_rotary_base(self, num_heads, rotary_base, axes):
         if rotary_base is None:
@@ -599,10 +604,10 @@ class RotaryEmbeddingMixedAxis(nn.Module):
         assert rotary_base.numel() == 1 or len(rotary_base) == num_heads, f"num_heads, rotary_base must be size 1 or size num_heads, instead got size {len(rotary_base)}"
         if rotary_base.numel() == 1:
             rotary_base = rotary_base.repeat(num_heads, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
         else:
             rotary_base = rotary_base[:, None].repeat(1, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
 
     def build_coords(self, H, W, device):
 
@@ -618,7 +623,7 @@ class RotaryEmbeddingMixedAxis(nn.Module):
         return x, y
 
     def get_embed(self, H, W, device):
-
+        self.freqs = self.freqs.to(device=device)
         x, y = self.build_coords(H, W, device)
 
         N = x.shape[0]
@@ -634,7 +639,6 @@ class RotaryEmbeddingMixedAxis(nn.Module):
             angles = torch.cat([angles, angles], dim=-1)
         else:
             angles = angles.repeat_interleave(2, dim=-1)
-
         return angles[:, None, :, :]
 
     def forward(self, H, W, device=None):
@@ -679,11 +683,9 @@ class RotaryEmbeddingPolar(nn.Module):
         self.rotary_base = self._init_rotary_base(num_heads,rotary_base,self.axes)
         self.normalize_coords = normalize_coords
 
-        inv_freq = 1 / self.rotary_base ** torch.arange(
-            0, 1, 4 / self.dim, dtype=torch.float32
-        )
-
-        self.register_buffer("periods", inv_freq, persistent=False)
+    def _get_periods(self, device):
+        return 1/(self.rotary_base.to(device) ** 
+                  torch.arange(0, 1, 4/self.dim, dtype=torch.float32,device=device))
 
     def _init_rotary_base(self, num_heads, rotary_base, axes):
         if rotary_base is None:
@@ -697,10 +699,10 @@ class RotaryEmbeddingPolar(nn.Module):
         assert rotary_base.numel() == 1 or len(rotary_base) == num_heads, f"num_heads, rotary_base must be size 1 or size num_heads, instead got size {len(rotary_base)}"
         if rotary_base.numel() == 1:
             rotary_base = rotary_base.repeat(num_heads, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
         else:
             rotary_base = rotary_base[:, None].repeat(1, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
     ############################################################
     # Coordinate builder (polar instead of Cartesian)
     ############################################################
@@ -751,6 +753,7 @@ class RotaryEmbeddingPolar(nn.Module):
     def get_embed(self, H: int, W: int, device) -> Tensor:
 
         coords = self._build_coords(H, W, device)
+        self.periods = self._get_periods(device)
 
         coords = coords[:, :, None, None]
 
@@ -809,6 +812,9 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
         self.dim = dim
         self.num_heads = num_heads
         self.axes = 1
+        learned_thetas = False
+        if rotary_base == None:
+            learned_thetas = True
         self.rotary_base = self._init_rotary_base(num_heads, rotary_base, self.axes)
         self.normalize_coords = normalize_coords
         self.rotate_half = rotate_half
@@ -848,8 +854,10 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
             freqs.append(torch.stack([fr, ftheta], dim=0))
 
         freqs = torch.stack(freqs, dim=0)
-
-        self.freqs = nn.Parameter(freqs)
+        if learned_thetas:
+            self.freqs = nn.Parameter(freqs)
+        else:
+            self.freqs = freqs
 
     def _init_rotary_base(self, num_heads, rotary_base, axes):
         if rotary_base is None:
@@ -863,10 +871,10 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
         assert rotary_base.numel() == 1 or len(rotary_base) == num_heads, f"num_heads, rotary_base must be size 1 or size num_heads, instead got size {len(rotary_base)}"
         if rotary_base.numel() == 1:
             rotary_base = rotary_base.repeat(num_heads, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
         else:
             rotary_base = rotary_base[:, None].repeat(1, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
 
     ############################################################
     # Build polar coordinates
@@ -908,6 +916,8 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
     def get_embed(self, H: int, W: int, device) -> Tensor:
 
         r, theta = self._build_coords(H, W, device)
+        self.rotary_base = self.rotary_base.to(device=device)
+        self.freqs = self.freqs.to(device=device)
 
         N = r.shape[0]
 
@@ -935,7 +945,7 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
         else:
 
             angles = angles.repeat_interleave(2, dim=-1)
-
+        
         return angles[:, None, :, :]
 
     ############################################################
@@ -979,10 +989,8 @@ class RotaryEmbeddingHilbert(nn.Module):
 
         assert dim % 2 == 0
 
-        # single learnable base frequency
-        base = torch.arange(0, dim, 2).float() / dim
 
-        self.freq = 1 / (self.rotary_base ** base)
+        self.register_buffer("base", torch.arange(0, dim, 2).float() / dim, persistent=False)
 
     def _init_rotary_base(self, num_heads, rotary_base, axes):
         if rotary_base is None:
@@ -996,10 +1004,10 @@ class RotaryEmbeddingHilbert(nn.Module):
         assert rotary_base.numel() == 1 or len(rotary_base) == num_heads, f"num_heads, rotary_base must be size 1 or size num_heads, instead got size {len(rotary_base)}"
         if rotary_base.numel() == 1:
             rotary_base = rotary_base.repeat(num_heads, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
         else:
             rotary_base = rotary_base[:, None].repeat(1, axes)
-            return nn.Parameter(rotary_base)
+            return rotary_base
 
     ############################################################
     # Hilbert curve utilities
@@ -1081,6 +1089,7 @@ class RotaryEmbeddingHilbert(nn.Module):
     def get_embed(self, H, W, device):
 
         coords = self.build_hilbert_grid(H, W, device)
+        self.freq = 1 / (self.rotary_base.to(device) ** self.base.to(device))
 
         N = H * W
 
@@ -1089,17 +1098,13 @@ class RotaryEmbeddingHilbert(nn.Module):
         ########################################################
 
         seq_positions = torch.arange(N, device=device).float()
-        print(seq_positions.size())
-        print(self.freq.size())
         angles_1d = seq_positions[:, None, None, None] * self.freq[None, None, :, :]
-        print(angles_1d.size())
 
         ########################################################
         # Step 2: scatter into 2D grid following Hilbert path
         ########################################################
 
         angle_grid = torch.zeros(H, W, 1, self.num_heads, self.dim//2, device=device)
-        print(angle_grid.size())
 
         for idx, (x, y) in enumerate(coords):
 
@@ -1110,7 +1115,6 @@ class RotaryEmbeddingHilbert(nn.Module):
         ########################################################
 
         angles = angle_grid.flatten(0,1)
-        print(angles.size())
 
         ########################################################
         # Step 4: expand across embedding dim
@@ -1124,8 +1128,7 @@ class RotaryEmbeddingHilbert(nn.Module):
         else:
 
             angles = angles.repeat_interleave(2, dim=-1)
-
-        return angles[:, None, :, :]
+        return angles
 
 
     ############################################################

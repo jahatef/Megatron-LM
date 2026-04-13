@@ -1815,6 +1815,13 @@ def _add_network_size_args(parser):
                        'Deprecated: use --position-embedding-type')
     group.add_argument('--rotary-base', type=int, default=10000,
                        help='Base to use for rotary positional embeddings, default 10000')
+    group.add_argument('--vit-rope-impl', type=str, default="axial",
+                       choices=['axial', 'mixed_axis', 'polar', 'mixed_polar', 'hilbert'],
+                       help='Designates which RoPE implementation to use for ViT training.')
+    group.add_argument('--vit-rotary-base', type=tuple_type, default=None,
+                       help='Base to use for ViT rotary positional embeddings, default: ' \
+                       'learned, per-head base. Must be either None, a tuple of size 1,' \
+                       'or a tuple of size num-attention-heads')
     group.add_argument('--rotary-percent', type=float, default=1.0,
                        help='Percent of rotary dimension to use, default 100%%')
     group.add_argument('--rotary-interleaved', action='store_true',

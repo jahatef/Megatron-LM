@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from megatron.core import parallel_state, tensor_parallel
+from megatron.core import tensor_parallel
 from megatron.core.enums import ModelType
 from megatron.core.transformer.transformer_block import TransformerBlock
 from megatron.core.transformer.transformer_config import TransformerConfig
@@ -26,11 +26,13 @@ from megatron.training import (
 from megatron.training.arguments import core_transformer_config_from_args
 
 from megatron.core.datasets.blended_megatron_dataset_builder import (
-    BlendedMegatronDatasetBuilder,
-)
-from megatron.core.datasets.utils import Split
+    BlendedMegatronDatasetBuilder
+    )
 from megatron.core.datasets.blended_megatron_dataset_config import (
     BlendedMegatronDatasetConfig,
+)
+from megatron.core.datasets.vision_dataset import (
+    MegatronVisionDataset,
 )
 
 
@@ -85,7 +87,6 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         )
 
         # Classification head (optional; can be removed for MAE-style pretrain)
-        #print(f"\n\n\n number of classes: {args.num_classes}\n\n\n")
         self.head = torch.nn.Linear(self.hidden_size, args.num_classes)
 
         self._init_weights()
@@ -124,7 +125,6 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
 
         # Patchify
         x = self.patch_embed(images)               # [B, C, H', W']
-        #print(f"\n\nx size: {x.size()}\n\n")
         x = x.flatten(2).transpose(1, 2)           # [B, N, D]
 
         # Add CLS token
@@ -156,25 +156,21 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
             device=x.device,
             dtype=torch.bool,
         )
-        print(f"input size: {x.size()}")
         x = self.encoder(
             x,
             attention_mask=attention_mask,
             rotary_pos_emb=rotary_pos_emb,
         )
 
-        #print(f"\n\n\n x before head: {x.shape} \n\n\n")
         cls_out = x[0]
 
         logits = self.head(cls_out)
-        #print(f"logits shape: {logits.shape}")
 
         if labels is None:
             return logits
         labels = labels.long()
         loss = F.cross_entropy(logits, labels)
         return  loss
-
 
 # -----------------------
 # Model provider
@@ -196,55 +192,11 @@ def model_provider(pre_process=True, post_process=True,config=None,pg_collection
     model = MegatronViT(config)
     return model
 
-
 # -----------------------
 # Dataset (dummy ImageNet-style)
 # -----------------------
-'''
-def train_valid_test_datasets_provider(train_val_test_num_samples):
-    from megatron.core.datasets.vision_dataset import (
-        MegatronVisionDataset,
-    )
-
-    args = get_args()
-    print_rank_0("Building ViT datasets via Megatron dataset builder ...")
-
-    # Build dataset config
-    dataset_config = BlendedMegatronDatasetConfig(
-        random_seed=args.seed,
-        sequence_length=0,  # unused for vision, but required
-        split=args.split,
-        tokenizer=None,     # vision does not use tokenizer
-        allow_ambiguous_pad_tokens=True,
-    )
-
-    builder = BlendedMegatronDatasetBuilder(
-        cls=MegatronVisionDataset,
-
-        config=dataset_config,
-    )
-
-    train_ds, valid_ds, test_ds = builder.build_datasets(
-        splits=(Split.train, Split.valid, Split.test),
-        num_samples=train_val_test_num_samples,
-    )
-
-    return train_ds, valid_ds, test_ds
-    '''
 
 def train_valid_test_datasets_provider(train_val_test_num_samples=[20, 1, 1]):
-    from megatron.core.datasets.blended_megatron_dataset_builder import (
-        BlendedMegatronDatasetBuilder,
-    )
-    from megatron.core.datasets.blended_megatron_dataset_config import (
-        BlendedMegatronDatasetConfig,
-    )
-    from megatron.core.datasets.utils import Split
-    from megatron.core.parallel_state import is_pipeline_first_stage
-    from megatron.core.datasets.vision_dataset import (
-        MegatronVisionDataset,
-    )
-
     args = get_args()
     print_rank_0("Building ViT datasets with BlendedMegatronDatasetBuilder ...")
 
@@ -277,10 +229,6 @@ def train_valid_test_datasets_provider(train_val_test_num_samples=[20, 1, 1]):
         train_val_test_num_samples[2],  # test
     ]
 
-    # --------------------------------------------------
-    # Only one rank actually builds datasets
-    # (Megatron standard pattern)
-    # --------------------------------------------------
     def is_built_on_rank():
         return (
             not torch.distributed.is_initialized()
@@ -300,9 +248,6 @@ def train_valid_test_datasets_provider(train_val_test_num_samples=[20, 1, 1]):
     train_ds, valid_ds, test_ds = builder.build()
 
     return train_ds, valid_ds, test_ds
-
-
-
 
 # -----------------------
 # Batch
@@ -324,8 +269,6 @@ def get_batch(data_iterator):
 
     return images, labels
 
-
-
 # -----------------------
 # Forward step
 # -----------------------
@@ -345,7 +288,6 @@ def forward_step(data_iterator, model):
 
     return logits, loss_func
 
-
 # -----------------------
 # Extra args
 # -----------------------
@@ -353,9 +295,7 @@ def forward_step(data_iterator, model):
 def add_vit_args(parser):
     group = parser.add_argument_group("ViT")
 
-
     return parser
-
 
 # -----------------------
 # Main
