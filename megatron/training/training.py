@@ -3062,11 +3062,11 @@ def evaluate(
 
     with torch.no_grad():
         iteration = 0
-        if verbose:
+        if True:
             print_rank_0(f'Evaluating on {eval_iters * eval_batch_size} samples')
         while iteration < eval_iters:
             iteration += 1
-            if verbose:
+            if True:
                 print_rank_0(f'Evaluating iter {iteration}/{eval_iters}')
 
             # Don't care about timing during evaluation
@@ -3082,6 +3082,7 @@ def evaluate(
                 decoder_seq_length=args.decoder_seq_length,
                 forward_only=True,
             )
+            #print(f"DEBUG: loss_dicts: {loss_dicts}")
             ft_integration.on_eval_step_end()
             config.timers = get_timers()
 
@@ -3097,11 +3098,12 @@ def evaluate(
                             [0.0, 0.0], dtype=torch.float
                         ).cuda()
                     val = [x[key].view(-1) for x in loss_dicts]
-
+                    #print(f"DEBUG: val key: {key} at evaluation: {val}")
                     if val[0].numel() == 2:
                         if args.sft:
                             # normalize over micro batch instead of global
                             val = torch.vstack(val)
+                            #print(f"DEBUG: val in numel=2: {val}")
                             val = val[:, 0] / val[:, 1]
                             val = val.mean()
                             torch.distributed.all_reduce(
@@ -3121,7 +3123,9 @@ def evaluate(
                             )
                             total_loss_dict[key] += val
                     elif val[0].numel() == 1:
+                        #print(f"DEBUG: val in numel 1 before sum: {val}")
                         val = torch.cat(val).sum()
+                        #print(f"DEBUG: val in numel=1: {val}, len: {len(loss_dicts)}")
                         total_loss_dict[key][0] += val
                         total_loss_dict[key][1] += len(loss_dicts)
                     else:
@@ -3163,6 +3167,7 @@ def evaluate(
 
     for key in total_loss_dict:
         numerator, denominator = total_loss_dict[key]
+        #print(f"DEBUG: key: {key}, value: {total_loss_dict[key]}")
         total_loss_dict[key] = numerator / denominator
 
     timers('evaluate').stop()
@@ -3205,14 +3210,18 @@ def evaluate_and_print_results(
 
     if args.full_validation:
         assert len(eval_iters) == len(data_iterators)
-
+        print(f"DEBUG: eval_iters: {eval_iters}")
         # with full validation we need to distribute eval_iters to all ranks
         if mpu.get_tensor_model_parallel_rank() == 0:
             eval_iters = torch.tensor(args.eval_iters, dtype=torch.long, device='cuda')
+            print(f"DEBUG: mpu eval_iters: {eval_iters}")
         else:
             eval_iters = torch.tensor([0] * len(eval_iters), dtype=torch.long, device='cuda')
+            print(f"DEBUG: else eval_iters: {eval_iters}")
         torch.distributed.broadcast(eval_iters, 0)
         eval_iters = eval_iters.tolist()
+        eval_iters = [eval_iters]
+        print(f"DEBUG: eval_iters: {eval_iters}")
         args.eval_iters = eval_iters[0] if not args.multiple_validation_sets else eval_iters
     elif not args.multiple_validation_sets:
         eval_iters = [args.eval_iters]
@@ -3409,6 +3418,7 @@ def build_train_valid_test_data_iterators(build_train_valid_test_datasets_provid
     """Build pretraining data iterators."""
 
     args = get_args()
+    print(f"DEBUG: build_train_valid_test_datasets_provider: {build_train_valid_test_datasets_provider}")
 
     # Build loaders.
     train_dataloader, valid_dataloaders, test_dataloader = build_train_valid_test_data_loaders(

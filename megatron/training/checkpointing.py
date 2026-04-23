@@ -281,9 +281,11 @@ def get_checkpoint_tracker_filename(checkpoints_path):
 
 
 def checkpoint_exists(checkpoints_path):
+    print(f"DEBUG: checkpoints_path: {checkpoints_path}")
     if checkpoints_path is None:
         return False
     path = get_checkpoint_tracker_filename(checkpoints_path)
+    print(f"DEBUG: checkpoint path: {path}")
     return isfile(path)
 
 
@@ -1100,6 +1102,7 @@ def _get_checkpoint_format(checkpoint_name, args):
         is_torch_ckpt = any([f.name.startswith("mp_rank_0") for f in checkpoint_dir.iterdir()])
         is_torch_dcp = checkpoint_dir.joinpath(".metadata").exists()
     else:
+        print(f"DEBUG: torch {os.listdir(checkpoint_name)}")
         is_torch_ckpt = any([f.startswith("mp_rank_0") for f in os.listdir(checkpoint_name)])
         is_torch_dcp = os.path.exists(os.path.join(checkpoint_name, ".metadata"))
 

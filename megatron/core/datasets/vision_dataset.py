@@ -11,12 +11,7 @@ from megatron.core.datasets.megatron_dataset import MegatronDataset
 from torchvision import transforms
 
 class VisionLowLevelDataset:
-    """Minimal low-level vision dataset.
-
-    Each item is (image_path, label).
-    """
-
-    def __init__(self, samples: List[Tuple[str, int]]):
+    def __init__(self, samples):
         self.samples = samples
 
     def __len__(self):
@@ -24,6 +19,19 @@ class VisionLowLevelDataset:
 
     def __getitem__(self, idx):
         return self.samples[idx]
+
+    def pad_to_multiple(self, multiple: int):
+        n = len(self.samples)
+        if n % multiple == 0:
+            return
+
+        target = ((n // multiple) + 1) * multiple
+        deficit = target - n
+
+        # deterministic padding (no randomness)
+        pad = self.samples[:deficit]
+        self.samples = self.samples + pad
+        print(f"DEBUG: padded!")
 
 import json
 import hashlib
@@ -62,6 +70,7 @@ class MegatronVisionDataset(MegatronDataset):
             index_split=index_split,
             config=config,
         )
+        self.batch_size = config.batch_size
         image_size = config.image_size
         self.transform = transforms.Compose([
                 transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
@@ -88,8 +97,9 @@ class MegatronVisionDataset(MegatronDataset):
                 img2.jpg
         """
         samples = []
+        rng = np.random.default_rng(config.random_seed)
         class_to_idx = {}  
-
+        print(f"DEBUG: dataset path: {dataset_path}")
         for class_idx, class_name in enumerate(sorted(os.listdir(dataset_path))):
             class_dir = os.path.join(dataset_path, class_name)
             if not os.path.isdir(class_dir):
@@ -100,8 +110,13 @@ class MegatronVisionDataset(MegatronDataset):
                     samples.append(
                         (os.path.join(class_dir, fname), class_idx)
                     )
+        rng.shuffle(samples)
+        dataset = VisionLowLevelDataset(samples)
+        print(f"DEBUG: pre-padded len: {len(dataset)}")
+        dataset.pad_to_multiple(config.batch_size)
+        print(f"DEBUG: post-padded len: {len(dataset)}")
 
-        return VisionLowLevelDataset(samples)
+        return dataset
 
     @staticmethod
     def _key_config_attributes() -> List[str]:
@@ -116,9 +131,9 @@ class MegatronVisionDataset(MegatronDataset):
     # ------------------------
     # Dataset interface
     # ------------------------
-    def __len__(self) -> int:
+    def __len__(self):
         if self.num_samples is not None:
-            return self.num_samples
+            return min(self.num_samples, len(self.indices))
         return len(self.indices)
 
     def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, np.ndarray]]:

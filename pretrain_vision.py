@@ -4,6 +4,7 @@ import os
 import math
 import torch
 import torch.nn.functional as F
+import numpy as np
 from torch import Tensor
 
 from megatron.core import tensor_parallel
@@ -34,6 +35,7 @@ from megatron.core.datasets.blended_megatron_dataset_config import (
 from megatron.core.datasets.vision_dataset import (
     MegatronVisionDataset,
 )
+from megatron.core.datasets.utils import Split
 
 
 
@@ -156,12 +158,15 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
             device=x.device,
             dtype=torch.bool,
         )
+        #print_rank_0(f"DEBUG: x shape before encoder: {x.size()}")
         x = self.encoder(
             x,
             attention_mask=attention_mask,
             rotary_pos_emb=rotary_pos_emb,
         )
-
+        #print_rank_0(f"DEBUG: x shape after encoder: {x.size()}")
+        #if x.size()[1] > 2:
+        #    print_rank_0(f"DEBUG: x across batch: {(x[:, 0] - x[:, 1]).abs().mean()}")
         cls_out = x[0]
 
         logits = self.head(cls_out)
@@ -196,37 +201,25 @@ def model_provider(pre_process=True, post_process=True,config=None,pg_collection
 # Dataset (dummy ImageNet-style)
 # -----------------------
 
-def train_valid_test_datasets_provider(train_val_test_num_samples=[20, 1, 1]):
+'''def train_valid_test_datasets_provider(train_val_test_num_samples):
     args = get_args()
+    print(f"DEBUG: train_val_test_num_samples: {train_val_test_num_samples}\n split: {args.split}")
     print_rank_0("Building ViT datasets with BlendedMegatronDatasetBuilder ...")
-
-    # --------------------------------------------------
-    # Dataset config
-    # --------------------------------------------------
-    dataset_root = args.data_path[0]
 
     dataset_config = BlendedMegatronDatasetConfig(
         random_seed=args.seed,
         sequence_length=0,
-        #split=args.split,
+        split=args.split,   # IMPORTANT
         tokenizer=None,
         image_size=args.img_size,
-        blend_per_split=[
-            ([os.path.join(dataset_root, "training")], None),
-            ([os.path.join(dataset_root, "testing")],   None), None
-            #([os.path.join(dataset_root, "testing")],  None),
-        ],
+        batch_size=args.global_batch_size,
+        blend=None,  # single dataset root
     )
 
-
-    # --------------------------------------------------
-    # Sample counts per split
-    # Order must match Split enum
-    # --------------------------------------------------
     sizes = [
-        train_val_test_num_samples[0],  # train
-        train_val_test_num_samples[1],  # valid
-        train_val_test_num_samples[2],  # test
+        train_val_test_num_samples[0],
+        train_val_test_num_samples[1],
+        train_val_test_num_samples[2],
     ]
 
     def is_built_on_rank():
@@ -235,20 +228,87 @@ def train_valid_test_datasets_provider(train_val_test_num_samples=[20, 1, 1]):
             or torch.distributed.get_rank() == 0
         )
 
-    # --------------------------------------------------
-    # Builder
-    # --------------------------------------------------
     builder = BlendedMegatronDatasetBuilder(
         cls=MegatronVisionDataset,
         sizes=sizes,
         is_built_on_rank=is_built_on_rank,
         config=dataset_config,
     )
+    print(f"DEBUG: sizes: {sizes}, ")
 
     train_ds, valid_ds, test_ds = builder.build()
 
-    return train_ds, valid_ds, test_ds
+    print_rank_0(
+        f"Dataset sizes: train={len(train_ds)}, "
+        f"valid={len(valid_ds)}, test={len(test_ds)}"
+    )
 
+    return train_ds, valid_ds, test_ds'''
+
+def train_valid_test_datasets_provider(_):
+    args = get_args()
+
+    print_rank_0("Building SIMPLE ViT datasets (no Megatron builder)")
+
+    root = args.data_path[0]
+
+    dataset_config = BlendedMegatronDatasetConfig(
+        random_seed=args.seed,
+        sequence_length=0,
+        split=args.split,
+        image_size=args.img_size,
+        tokenizer=None,
+        batch_size=args.global_batch_size,
+        blend=None,
+        allow_ambiguous_pad_tokens=True,
+    )
+
+    # ---- build actual dataset (important fix) ----
+    low_level_dataset = MegatronVisionDataset.build_low_level_dataset(
+        root,
+        dataset_config,
+    )
+
+    # correct indices (over samples, NOT directories)
+    indices = np.arange(len(low_level_dataset), dtype=np.int32)
+    rng = np.random.default_rng(args.seed)
+    rng.shuffle(indices)   
+
+    n = len(indices)
+    train_end = int(0.8 * n)
+    val_end = int(0.9 * n)
+
+    train_idx = indices[:train_end]
+    valid_idx = indices[train_end:val_end]
+    test_idx  = indices[val_end:]
+
+    pad = lambda x: np.pad(
+        x,
+        (0, (-len(x)) % args.global_batch_size),
+        mode="wrap"
+    )
+
+    train_idx = pad(train_idx)
+    valid_idx = pad(valid_idx)
+    test_idx  = pad(test_idx)
+
+    train_ds = MegatronVisionDataset(
+        low_level_dataset, root, train_idx, None, Split.train, dataset_config
+    )
+
+    valid_ds = MegatronVisionDataset(
+        low_level_dataset, root, valid_idx, None, Split.valid, dataset_config
+    )
+
+    test_ds = MegatronVisionDataset(
+        low_level_dataset, root, test_idx, None, Split.test, dataset_config
+    )
+    print_rank_0(
+        f"Dataset sizes: train={len(train_ds)}, "
+        f"valid={len(valid_ds)}, test={len(test_ds)}"
+    )
+
+    return train_ds, valid_ds, test_ds
 # -----------------------
 # Batch
 # -----------------------
@@ -280,10 +340,37 @@ def forward_step(data_iterator, model):
     timers("batch").stop()
 
     logits = model(images)
+    #logits1 = model(images[:1])
+    #logits2 = model(images[1:2])
+    #print(f"DEBUG: logits difference: {(logits1 - logits2).abs().mean()}")
+
     def loss_func(output_tensor):
         loss = F.cross_entropy(output_tensor, labels)
 
-        loss_dict = {"loss": loss}
+        with torch.no_grad():
+            # ---- Top-1 accuracy ----
+            _, preds = torch.max(output_tensor, dim=-1)
+            #print(f"DEBUG: output_tensor: {output_tensor}")
+            #print(f"DEBUG: output_tensor.size(): {output_tensor.size()}")
+            #print(f"DEBUG: predictions: {preds}")
+            #print(f"DEBUG: labels: {labels}")
+            top1_acc = (preds == labels).float().mean()
+
+            # ---- Top-5 accuracy ----
+            top5_preds = output_tensor.topk(5, dim=-1).indices
+            top5_acc = (
+                top5_preds.eq(labels.unsqueeze(-1))
+                .any(dim=-1)
+                .float()
+                .mean()
+            )
+
+        loss_dict = {
+            "loss": loss,
+            "top1_acc": top1_acc,
+            "top5_acc": top5_acc,
+        }
+
         return loss, loss_dict
 
     return logits, loss_func
