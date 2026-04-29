@@ -59,6 +59,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         self.rotary_base = args.vit_rotary_base
         self.rope_impl = args.vit_rope_impl
         self.num_patches = (self.img_h // self.patch_size) * (self.img_w // self.patch_size)
+        self.dropout = args.hidden_dropout
 
         # Patch embedding
         self.patch_embed = torch.nn.Conv2d(
@@ -71,6 +72,8 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
 
         # CLS token
         self.cls_token = torch.nn.Parameter(torch.zeros(1, 1, self.hidden_size))
+        self.num_prefix_tokens = 1
+        self.reduce_include_prefix = False
 
         # Position embedding
         if self.pos_embed_type == "learned_absolute":
@@ -90,6 +93,8 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
 
         # Classification head (optional; can be removed for MAE-style pretrain)
         self.head = torch.nn.Linear(self.hidden_size, args.num_classes)
+        self.head_drop = torch.nn.Dropout(self.dropout)
+        self.pool_type = "token"
 
         self._init_weights()
         
@@ -104,8 +109,34 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         else:
             self.rotary_emb = None
 
+    def pool(
+            self,
+            x: torch.Tensor,
+    ):
+        """Apply global pooling to tensor in NLC format.
 
-            
+        Args:
+            x: Input tensor in (batch, length, channels) format.
+
+        Returns:
+            Pooled tensor.
+        """
+        if not self.pool_type:
+            return x
+        if self.pool_type == 'token':
+            x = x[0, :]  # class token
+        else:
+            x = x if self.reduce_include_prefix else x[:, self.num_prefix_tokens:]
+            if self.pool_type == 'avg':
+                x = x.mean(dim=0)
+            elif self.pool_type == 'avgmax':
+                x = 0.5 * (x.amax(dim=0) + x.mean(dim=0))
+            elif self.pool_type == 'max':
+                x = x.amax(dim=0)
+            else:
+                assert not self.pool_type, f'Unknown pool type {self.pool_type}'
+
+        return x
             
     def _init_weights(self):
         if self.pos_embed is not None:
@@ -121,27 +152,29 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         used by internal code to bypass the input provided by the
         forward_step_func"""
         self.input_tensor = input_tensor
-
+    
+    def forward_head(self, x):
+        x = self.pool(x)
+        x = self.head_drop(x)
+        x = self.head(x)
+        return x
+    
     def forward(self, images, labels=None):
         B = images.shape[0]
 
         # Patchify
         x = self.patch_embed(images)               # [B, C, H', W']
         x = x.flatten(2).transpose(1, 2)           # [B, N, D]
-
+        
         # Add CLS token
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)      # [B, N+1, D]
-
         # Add positional embeddings
         if self.pos_embed is not None:
             x = x + self.pos_embed
 
         # Megatron expects [seq, batch, hidden]
         x = x.transpose(0, 1)
-
-        # Transformer
-        seq_len, batch_size, H = x.shape
 
         rotary_pos_emb = None
 
@@ -152,24 +185,13 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
                 device=x.device,
             )
 
-        # Vision has no masking → allow all attention
-        attention_mask = torch.ones(
-            (batch_size, 1, seq_len, seq_len),
-            device=x.device,
-            dtype=torch.bool,
-        )
-        #print_rank_0(f"DEBUG: x shape before encoder: {x.size()}")
+        attention_mask = None
         x = self.encoder(
             x,
             attention_mask=attention_mask,
             rotary_pos_emb=rotary_pos_emb,
         )
-        #print_rank_0(f"DEBUG: x shape after encoder: {x.size()}")
-        #if x.size()[1] > 2:
-        #    print_rank_0(f"DEBUG: x across batch: {(x[:, 0] - x[:, 1]).abs().mean()}")
-        cls_out = x[0]
-
-        logits = self.head(cls_out)
+        logits = self.forward_head(x)
 
         if labels is None:
             return logits
@@ -318,14 +340,18 @@ def get_batch(data_iterator):
         data = next(data_iterator)
     else:
         data = None
+    
     data = tensor_parallel.broadcast_data(
-        ["images", "labels"],
+        ["images", "labels", "idx"],
         data,
         datatype=torch.float32,
     )
 
+    idx = data["idx"]
+
     images = data["images"]
     labels = data["labels"].long()
+
 
     return images, labels
 
@@ -340,9 +366,6 @@ def forward_step(data_iterator, model):
     timers("batch").stop()
 
     logits = model(images)
-    #logits1 = model(images[:1])
-    #logits2 = model(images[1:2])
-    #print(f"DEBUG: logits difference: {(logits1 - logits2).abs().mean()}")
 
     def loss_func(output_tensor):
         loss = F.cross_entropy(output_tensor, labels)
@@ -350,14 +373,11 @@ def forward_step(data_iterator, model):
         with torch.no_grad():
             # ---- Top-1 accuracy ----
             _, preds = torch.max(output_tensor, dim=-1)
-            #print(f"DEBUG: output_tensor: {output_tensor}")
-            #print(f"DEBUG: output_tensor.size(): {output_tensor.size()}")
-            #print(f"DEBUG: predictions: {preds}")
-            #print(f"DEBUG: labels: {labels}")
+            
             top1_acc = (preds == labels).float().mean()
 
             # ---- Top-5 accuracy ----
-            top5_preds = output_tensor.topk(5, dim=-1).indices
+            top5_preds = output_tensor.topk(min(output_tensor.size()[-1],5), dim=-1).indices
             top5_acc = (
                 top5_preds.eq(labels.unsqueeze(-1))
                 .any(dim=-1)

@@ -1,0 +1,67 @@
+{
+  "model": {
+    "num_layers": 24,
+    "hidden_size": 1024,
+    "num_attention_heads": 16,
+    "seq_length": 196,
+    "max_position_embeddings": 196,
+    "position_embedding_type": "rope",
+    "vit_rope_impl": "axial",
+    "vit_rotary_base": 100,
+    "img_size": 1536,
+    "patch_dim": 16,
+    "attention_backend": "flash",
+    "transformer_impl": "transformer_engine"
+  },
+
+  "training": {
+    "micro_batch_size": 2,
+    "global_batch_size": 256,
+    "train_iters": 3130,
+    "weight_decay": 0.2,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+    "init_method_std": 0.006,
+    "clip_grad": 1.0,
+    "bf16": true,
+    "lr": 1e-4,
+    "lr_decay_style": "cosine",
+    "min_lr": 1e-6,
+    "lr_warmup_fraction": 0.05,
+    "lr_decay_iters": 3130,
+    "recompute_granularity": "selective",
+    "profile": false,
+    "profile-step-start": 3,
+    "profile-step-end": 8,
+    "use-pytorch-profiler": false,
+    "record-memory-history": false,
+    "finetune": true
+  },
+
+  "model_parallel": {
+    "tensor_model_parallel_size": 1,
+    "pipeline_model_parallel_size": 1
+  },
+
+  "data": {
+    "split": "80,10,10",
+    "num_classes": 1000
+  },
+
+  "logging": {
+    "log_interval": 20,
+    "save_interval": 313,
+    "eval_interval": 313,
+    "eval_iters": 40,
+    "log_device_memory_used": true,
+    "log_learning_rate": true,
+    "log_level": 1,
+    "save": "/home/hatef.4/megatron/Megatron-LM/checkpoints-warmup-10-epochs-shuffle",
+    "load": "/home/hatef.4/megatron/Megatron-LM/checkpoints",
+    "log_throughput": true,
+    "log_params_norm": true,
+    "timing_log_level": 0,
+    "wandb_project": "vit-synth-rope-experiments",
+    "wandb_exp_name": "warmup-flipped-eval-train"
+  }
+}
