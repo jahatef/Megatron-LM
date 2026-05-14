@@ -5,7 +5,7 @@ import timm
 TIMM_MODEL = "hf_hub:naver-ai/rope_axial_deit_large_patch16_LS"
 ckpt_dir = "checkpoints/iter_0000000"
 OUTPUT=f"{ckpt_dir}/mp_rank_00/model_optim_rng.pt"
-COPY_HEAD = True
+COPY_HEAD = False
 
 print("Loading timm model...")
 
@@ -161,6 +161,20 @@ for i in range(num_layers):
         f"{timm_prefix}.mlp.fc2.bias",
     )
 
+    ############################################
+    # layerscale
+    ############################################
+
+    copy(
+        f"{meg_prefix}.gamma_1",
+        f"{timm_prefix}.gamma_1",
+    )
+
+    copy(
+        f"{meg_prefix}.gamma_2",
+        f"{timm_prefix}.gamma_2",
+    )
+
 
 ############################################
 # Final LayerNorm
@@ -172,7 +186,6 @@ if "norm.weight" in state:
 
     copy("encoder.final_layernorm.weight", "norm.weight")
     copy("encoder.final_layernorm.bias", "norm.bias")
-
 
 ############################################
 # classifier head (ALWAYS INIT NEW)
@@ -198,12 +211,12 @@ else:
 
     # fallback (safe default for ViT pretrained on ImageNet)
     if target_num_classes is None:
-        target_num_classes = 1000
+        target_num_classes = 500
 
     hidden_size = model.embed_dim  # timm ViT attribute
 
     # initialize fresh head weights (Megatron format)
-    target_num_classes = 1000
+    target_num_classes = 500
     head_weight = torch.empty(target_num_classes, hidden_size)
     head_bias = torch.zeros(target_num_classes)
 

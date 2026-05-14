@@ -3450,17 +3450,23 @@ def build_train_valid_test_data_iterators(build_train_valid_test_datasets_provid
         train_data_iterator = None
 
     if valid_dataloaders is not None:
+        print(f"DEBUG: val loader not none")
         # when using full validation, we need to override eval iters with the correct
         # number of iterations on tp rank 0 so that it can be distributed to the other
         # ranks later
         if args.full_validation:
+            print(f"DEBUG: full_validation")
             if args.multiple_validation_sets:
+                print(f"DEBUG: multiple val sets")
                 if valid_dataloaders[0] is None:
                     args.eval_iters = [None]*len(valid_dataloaders)
+                    print(f"DEBUG: eval_iters1: {args.eval_iters}")
                 else:
+                    print(f"DEBUG: eval_iters2: {args.eval_iters}")
                     args.eval_iters = [len(dl) for dl in valid_dataloaders]
             else:
                 args.eval_iters = len(valid_dataloaders[0])
+                print(f"DEBUG: eval_iters one val set: {args.eval_iters}")
 
         if args.multiple_validation_sets:
             if valid_dataloaders[0] is None:
@@ -3476,6 +3482,7 @@ def build_train_valid_test_data_iterators(build_train_valid_test_datasets_provid
                 ]
         elif valid_dataloaders[0] is not None:
             valid_data_iterators = _get_iterator(dl_type, valid_dataloaders[0])
+            print(f"DEBUG: get_iterator elif")
         else:
             valid_data_iterators = None
     else:

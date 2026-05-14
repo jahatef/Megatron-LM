@@ -486,7 +486,7 @@ class RotaryEmbeddingAxial(nn.Module):
         if rotary_base is None:
             # init learned rotary base
             return nn.Parameter(
-                torch.rand(num_heads, axes)*500
+                torch.rand(num_heads, axes)*1000
             )
 
         rotary_base = torch.tensor(rotary_base, dtype=torch.float32)
@@ -506,31 +506,47 @@ class RotaryEmbeddingAxial(nn.Module):
             torch.arange(W, device=device),
             indexing="ij",
         )
-        y = (y + 0.5) / H * 2 - 1
-        x = (x + 0.5) / W * 2 - 1
-        coords = torch.stack([y, x], dim=-1)
+        #print(f"DEBUG: coords without norm: {torch.stack([x, y], dim=-1)}")
+        #print(f"DEBUG: coords without norm after view: {torch.stack([x, y], dim=-1).view(-1,2)}")
+        #y = (y + 0.5) / H * 2 - 1
+        #x = (x + 0.5) / W * 2 - 1
+        coords = torch.stack([x, y], dim=-1)
         return coords.view(-1, 2)
     
     def get_embed(self, H: int, W: int, device) -> Tensor:
         coords = self._build_coords(H,W,device)
         self.periods = self._get_periods(device)
         coords= coords[:, :, None, None]
-
-        angles = 2 * math.pi * coords * self.periods[None, None, :,:].to(device)
-
+        #print(f"DEBUG: periods size: {self.periods.size()}, periods: {self.periods}")
+        #print(f"DEBUG: coords size: {coords.size()}, coords: {coords[:,:,0,0]}")
+        angles = coords * self.periods[None, None, :,:].to(device)
+        #print(f"DEBUG: angles before permute: {angles.size()}, angles: {angles}")
+        #print(f"DEBIG: angles sin before permute size at get_embed: {angles.size()}, angles: \n{torch.sin(angles)}")
         angles = angles.permute(0, 2, 1, 3)
+        #print(f"DEBUG: angles before flatten: {angles.size()}, angles: {angles}")
+        #print(f"DEBIG: angles sin before flatten size at get_embed: {angles.size()}, angles: \n{torch.sin(angles)}")
         angles = angles.flatten(2, 3)
+        #print(f"DEBIG: angles before repeat size at get_embed: {angles.size()}, angles: \n{angles[:,0,:]}")
+        #print(f"DEBIG: angles sin before repeat size at get_embed: {angles.size()}, angles: \n{torch.sin(angles[:,0,:])}")
         if self.rotate_half:
+            #print(f"DEBUG: rotate_half")
             angles = angles.tile(2)
         else:
+            #print("DEBUG: interleave")
             angles = angles.repeat_interleave(2, dim=-1)
+        #for i in range(angles.size()[1]):
+            #print(f"DEBIG: channel {i}, angles after repeat size at get_embed: {angles.size()}, angles: \n{angles[:,i,:]}")
+            #print(f"DEBIG: channel {i}, angles sin after repeat size at get_embed: {angles.size()}, angles: \n{torch.sin(angles[:,i,:])}")
         return angles[:, None, :, :] #cos[:, None, None, :], sin[:, None, None, :]
 
     def forward(self, H: int, W: int, device=None) -> Tensor:
         if device is None:
             device = self.periods.device
 
-        return self.get_embed(H, W, device)
+        pos =  self.get_embed(H, W, device)
+        #for i in range(pos.size()[3]):
+        #    print(f"DEBUG: channel {i} pos size: {pos.size()} pos: \n{pos[:,0,0,i]}")
+        return pos
 
 class RotaryEmbeddingMixedAxis(nn.Module):
     """
@@ -596,7 +612,7 @@ class RotaryEmbeddingMixedAxis(nn.Module):
         if rotary_base is None:
             # init learned rotary base
             return nn.Parameter(
-                torch.rand(num_heads, axes)*500
+                torch.rand(num_heads, axes)*200
             )
 
         rotary_base = torch.tensor(rotary_base, dtype=torch.float32)
@@ -691,7 +707,7 @@ class RotaryEmbeddingPolar(nn.Module):
         if rotary_base is None:
             # init learned rotary base
             return nn.Parameter(
-                torch.rand(num_heads, axes)*500
+                torch.rand(num_heads, axes)*200
             )
 
         rotary_base = torch.tensor(rotary_base, dtype=torch.float32)
@@ -716,8 +732,8 @@ class RotaryEmbeddingPolar(nn.Module):
         )
 
         # Normalize to [-1, 1]
-        y = (y + 0.5) / H * 2 - 1
-        x = (x + 0.5) / W * 2 - 1
+        #y = (y + 0.5) / H * 2 - 1
+        #x = (x + 0.5) / W * 2 - 1
 
         ########################################################
         # Convert to polar coordinates
@@ -727,7 +743,7 @@ class RotaryEmbeddingPolar(nn.Module):
 
         theta = torch.atan2(y, x)  # range [-π, π]
 
-        if self.normalize_coords == "separate":
+        '''if self.normalize_coords == "separate":
 
             # normalize radius to [0, 1]
             r = r / r.max()
@@ -740,7 +756,7 @@ class RotaryEmbeddingPolar(nn.Module):
             scale = max(H, W)
 
             r = r / scale
-            theta = theta / math.pi
+            theta = theta / math.pi'''
 
         coords = torch.stack([r, theta], dim=-1)
 
@@ -757,7 +773,7 @@ class RotaryEmbeddingPolar(nn.Module):
 
         coords = coords[:, :, None, None]
 
-        angles = 2 * math.pi * coords * self.periods[None, None, :, :].to(device)
+        angles =  coords * self.periods[None, None, :, :].to(device)
 
         angles = angles.permute(0, 2, 1, 3)
         angles = angles.flatten(2, 3)
@@ -863,7 +879,7 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
         if rotary_base is None:
             # init learned rotary base
             return nn.Parameter(
-                torch.rand(num_heads, axes)*500
+                torch.rand(num_heads, axes)*200
             )
 
         rotary_base = torch.tensor(rotary_base, dtype=torch.float32)
@@ -888,14 +904,14 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
             indexing="ij",
         )
 
-        y = (y + 0.5) / H * 2 - 1
-        x = (x + 0.5) / W * 2 - 1
+        #y = (y + 0.5) / H * 2 - 1
+        #x = (x + 0.5) / W * 2 - 1
 
         r = torch.sqrt(x ** 2 + y ** 2)
 
         theta = torch.atan2(y, x)
 
-        if self.normalize_coords == "separate":
+        '''if self.normalize_coords == "separate":
 
             r = r / r.max()
             theta = theta / math.pi
@@ -905,7 +921,7 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
             scale = max(H, W)
 
             r = r / scale
-            theta = theta / math.pi
+            theta = theta / math.pi'''
 
         return r.flatten(), theta.flatten()
 
@@ -986,6 +1002,8 @@ class RotaryEmbeddingHilbert(nn.Module):
         self.num_heads = num_heads
         self.axes = 1
         self.rotary_base = self._init_rotary_base(num_heads, rotary_base, self.axes)
+        self.rotary_base ** 2 
+        #rotary base should be squared, as bases are passed for other rope implementations are square rooted
 
         assert dim % 2 == 0
 
@@ -996,7 +1014,7 @@ class RotaryEmbeddingHilbert(nn.Module):
         if rotary_base is None:
             # init learned rotary base
             return nn.Parameter(
-                torch.rand(num_heads, axes)*500
+                torch.rand(num_heads, axes)*200
             )
 
         rotary_base = torch.tensor(rotary_base, dtype=torch.float32)

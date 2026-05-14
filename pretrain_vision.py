@@ -84,6 +84,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
             self.pos_embed = None
 
         # Transformer encoder
+        config.apply_residual_connection_post_layernorm = True
         self.encoder = TransformerBlock(
             config=config,
             spec=config.layer_spec,
@@ -186,16 +187,19 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
             )
 
         attention_mask = None
+        rot = torch.cat([rotary_pos_emb.sin(), rotary_pos_emb.cos()],-1)
+        #print(f"DEBUG: rotary_pos_emb size: {rot.size()}, rotary_pos_emb: {rot}")
+        #print(f"DEBUG: x before attention size: {x.size()}, x: {x}")
         x = self.encoder(
             x,
             attention_mask=attention_mask,
             rotary_pos_emb=rotary_pos_emb,
         )
+        #print(f"DEBUG: x before head size: {x.size()}, x: {x}")
         logits = self.forward_head(x)
-
+        #print(f"DEBUG: logits after head size: {logits.size()}, logits: {logits}")
         if labels is None:
             return logits
-        labels = labels.long()
         loss = F.cross_entropy(logits, labels)
         return  loss
 
@@ -277,7 +281,7 @@ def train_valid_test_datasets_provider(_):
     dataset_config = BlendedMegatronDatasetConfig(
         random_seed=args.seed,
         sequence_length=0,
-        split=args.split,
+        split=None,
         image_size=args.img_size,
         tokenizer=None,
         batch_size=args.global_batch_size,
@@ -289,6 +293,9 @@ def train_valid_test_datasets_provider(_):
     low_level_dataset = MegatronVisionDataset.build_low_level_dataset(
         root,
         dataset_config,
+    )
+    print_rank_0(
+        f"Total Dataset size: {len(low_level_dataset)}"
     )
 
     # correct indices (over samples, NOT directories)
@@ -340,20 +347,20 @@ def get_batch(data_iterator):
         data = next(data_iterator)
     else:
         data = None
-    
-    data = tensor_parallel.broadcast_data(
-        ["images", "labels", "idx"],
+    #print(f"DEBUG: data: {data}")
+    '''data = tensor_parallel.broadcast_data(
+        ["images", "labels"],
         data,
         datatype=torch.float32,
-    )
-
+    )'''
+    #print(f"DEBUG: data: {data}")
+    images = data["images"].to("cuda")
+    labels = data["labels"].long().to("cuda")
+    paths = data["class_path"]
+    class_name = data["class_name"]
     idx = data["idx"]
 
-    images = data["images"]
-    labels = data["labels"].long()
-
-
-    return images, labels
+    return images, labels, paths, class_name, idx
 
 # -----------------------
 # Forward step
@@ -362,12 +369,22 @@ def get_batch(data_iterator):
 def forward_step(data_iterator, model):
     timers = get_timers()
     timers("batch").start()
-    images, labels = get_batch(data_iterator)
+    images, labels, paths, class_name, idx = get_batch(data_iterator)
+
     timers("batch").stop()
+    #for info in zip(paths, labels, class_name):
+    #    print(f"DEBUG: paths and labels: {info}")
+
+    '''for name, param in model.named_parameters():
+        if param is None:
+            print(f"{name} is none")
+        flat = param.data.view(-1)  # flatten tensor
+        print(f"{name}: {flat[:5]}")'''
 
     logits = model(images)
 
     def loss_func(output_tensor):
+        #assert False
         loss = F.cross_entropy(output_tensor, labels)
 
         with torch.no_grad():
@@ -382,9 +399,7 @@ def forward_step(data_iterator, model):
                 top5_preds.eq(labels.unsqueeze(-1))
                 .any(dim=-1)
                 .float()
-                .mean()
-            )
-
+                .mean())
         loss_dict = {
             "loss": loss,
             "top1_acc": top1_acc,

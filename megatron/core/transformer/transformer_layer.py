@@ -460,7 +460,12 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         # TORCH_MINOR = int(torch.__version__.split('.')[1])
         # use_nvfuser = TORCH_MAJOR > 1 or (TORCH_MAJOR == 1 and TORCH_MINOR >= 10)
         # self.bias_dropout_add_exec_handler = nullcontext if use_nvfuser else torch.enable_grad
+        
         self.bias_dropout_add_exec_handler = torch.enable_grad
+        self.gamma_1 = torch.nn.Parameter(torch.empty(self.config.hidden_size, dtype=torch.float16,
+                    device=torch.cuda.current_device()))
+        self.gamma_2 = torch.nn.Parameter(torch.empty(self.config.hidden_size, dtype=torch.float16,
+                    device=torch.cuda.current_device()))
 
     @staticmethod
     def _get_layer_offset(config: TransformerConfig):
@@ -488,6 +493,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         # runners in the cuda graph manager
         kwargs.pop("dynamic_inference_decode_only", None)
         hidden_states, context = self._forward_attention(*args, **kwargs)
+        #print(f"DEBUG: x after attention size: {hidden_states.size()}, x: {hidden_states}")
         output = self._forward_mlp(hidden_states, kwargs.get("inference_context", None))
         return output, context
 
@@ -598,7 +604,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         else:
             with self.bias_dropout_add_exec_handler():
                 hidden_states = self.self_attn_bda(self.training, self.config.bias_dropout_fusion)(
-                    attention_output_with_bias, residual, self.hidden_dropout
+                    attention_output_with_bias, residual, self.hidden_dropout, self.gamma_1
                 )
         nvtx_range_pop(suffix="self_attn_bda")
 
@@ -770,7 +776,7 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         else:
             with self.bias_dropout_add_exec_handler():
                 hidden_states = self.mlp_bda(self.training, self.config.bias_dropout_fusion)(
-                    mlp_output_with_bias, residual, self.hidden_dropout
+                    mlp_output_with_bias, residual, self.hidden_dropout, self.gamma_2
                 )
         nvtx_range_pop(suffix="mlp_bda")
         # Delay the offload of the mlp norm until after the mlp_bda has been computed

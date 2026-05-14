@@ -9,6 +9,8 @@ from abc import ABC
 from PIL import Image
 from megatron.core.datasets.megatron_dataset import MegatronDataset
 from torchvision import transforms
+from megatron.core.datasets.utils import Split
+import traceback
 
 class VisionLowLevelDataset:
     def __init__(self, samples):
@@ -31,7 +33,7 @@ class VisionLowLevelDataset:
         # deterministic padding (no randomness)
         pad = self.samples[:deficit]
         self.samples = self.samples + pad
-        print(f"DEBUG: padded!")
+        #print(f"DEBUG: padded!")
 
 import json
 import hashlib
@@ -72,10 +74,23 @@ class MegatronVisionDataset(MegatronDataset):
         )
         self.batch_size = config.batch_size
         image_size = config.image_size
-        self.transform = transforms.Compose([
+        if index_split == Split.train:
+            self.transform = transforms.Compose([
+                #transforms.CenterCrop(image_size),
+                transforms.RandomResizedCrop(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
+                transforms.RandomHorizontalFlip(),
+                transforms.ColorJitter(0.4, 0.4, 0.4, 0.1),
+                transforms.RandAugment(num_ops=2, magnitude=9),
+                transforms.ToTensor(),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+                transforms.RandomErasing(p=0.25),
+            ])
+        else:
+            self.transform = transforms.Compose([
                 transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
                 transforms.CenterCrop(image_size),
-                transforms.ToTensor(),  # float32, [0,1]
+                transforms.ToTensor(),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
             ])
 
     # ------------------------
@@ -99,22 +114,25 @@ class MegatronVisionDataset(MegatronDataset):
         samples = []
         rng = np.random.default_rng(config.random_seed)
         class_to_idx = {}  
-        print(f"DEBUG: dataset path: {dataset_path}")
+        #print(f"DEBUG: dataset path: {dataset_path}")
         for class_idx, class_name in enumerate(sorted(os.listdir(dataset_path))):
             class_dir = os.path.join(dataset_path, class_name)
+            #print(f"DEBUG: class_name: {class_name}")
             if not os.path.isdir(class_dir):
                 continue
             class_to_idx[class_name] = class_idx
             for fname in os.listdir(class_dir):
                 if fname.lower().endswith((".jpg", ".png", ".jpeg", ".bmp", ".tif")):
                     samples.append(
-                        (os.path.join(class_dir, fname), class_idx)
+                        (os.path.join(class_dir, fname), class_idx, class_dir, class_name)
                     )
-        rng.shuffle(samples)
+        #print(f"DEBUG: samples: {samples[:5]}")
+        #rng.shuffle(samples)
+        #print(f"DEBUG: samples: {samples[:5]}")
         dataset = VisionLowLevelDataset(samples)
-        print(f"DEBUG: pre-padded len: {len(dataset)}")
+        #print(f"DEBUG: pre-padded len: {len(dataset)}")
         dataset.pad_to_multiple(config.batch_size)
-        print(f"DEBUG: post-padded len: {len(dataset)}")
+        #print(f"DEBUG: post-padded len: {len(dataset)}")
 
         return dataset
 
@@ -138,8 +156,7 @@ class MegatronVisionDataset(MegatronDataset):
 
     def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, np.ndarray]]:
         real_idx = self.indices[idx]
-        image_path, label = self.dataset[real_idx]
-
+        image_path, label, class_path, class_name = self.dataset[real_idx]
         # Load image
         image = Image.open(image_path).convert("RGB")
 
@@ -149,9 +166,18 @@ class MegatronVisionDataset(MegatronDataset):
             # Default: convert to tensor
             image = torch.from_numpy(
                 np.array(image)
-            ).permute(2, 0, 1).float() / 255.0
+            )#.permute(2, 0, 1).float() / 255.0
+        #print(f"DEBUG: label: {label}, path: {image_path}, class_name: {class_name }")
+        #print(f"DEBUG: labels after cast: {torch.tensor(label, dtype=torch.float32)}")
+
+        #traceback.print_stack()
+
 
         return {
             "images": image,
+            #"labels": torch.tensor(label, dtype=torch.long),
             "labels": torch.tensor(label, dtype=torch.float32),
+            "class_path": class_path, 
+            "class_name": class_name,
+            "idx": torch.tensor(idx, dtype=torch.float32)
         }

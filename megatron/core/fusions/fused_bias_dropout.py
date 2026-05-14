@@ -8,14 +8,14 @@ from megatron.core.jit import jit_fuser
 # pylint: disable=missing-function-docstring
 
 
-def _bias_dropout_add_func(x_with_bias, residual, prob, training):
+def _bias_dropout_add_func(x_with_bias, residual, prob, training, layerscale):
     # type: (Tuple[Tensor, Optional[Tensor]], Tensor, float, bool) -> Tensor
     # NOTE: Previously, the argument `bias` used to be passed as
     # `bias.expand_as(residual)` when the `bias_dropout_func` is called from the
     # transformer layer but broadcasting should automatically take care of that.
     # Also, looking at broadcasting semantics, `expand_as` and broadcasting
     # seem to be identical performance-wise (both just change the view).
-
+    #print(f"DEBUG: _bias_dropout_add_func")
     x, bias = x_with_bias  # unpack
 
     # Run in-place if in eval mode and inputs do not require gradients
@@ -42,6 +42,7 @@ def _bias_dropout_add_func(x_with_bias, residual, prob, training):
             x.add_(bias)
         else:
             x = x + bias
+        x = layerscale * x
         out = torch.nn.functional.dropout(x, p=prob, training=training, inplace=inplace)
         if inplace:
             out.add_(residual)
@@ -66,16 +67,16 @@ def bias_dropout_add_unfused(training):
 
 @jit_fuser
 def bias_dropout_add_fused_train(
-    x_with_bias: Tuple[torch.Tensor, Optional[torch.Tensor]], residual: torch.Tensor, prob: float
+    x_with_bias: Tuple[torch.Tensor, Optional[torch.Tensor]], residual: torch.Tensor, prob: float, layerscale: torch.Tensor
 ) -> torch.Tensor:
-    return _bias_dropout_add_func(x_with_bias, residual, prob, True)
+    return _bias_dropout_add_func(x_with_bias, residual, prob, True, layerscale)
 
 
 @jit_fuser
 def bias_dropout_add_fused_inference(
-    x_with_bias: Tuple[torch.Tensor, Optional[torch.Tensor]], residual: torch.Tensor, prob: float
+    x_with_bias: Tuple[torch.Tensor, Optional[torch.Tensor]], residual: torch.Tensor, prob: float, layerscale: torch.Tensor
 ) -> torch.Tensor:
-    return _bias_dropout_add_func(x_with_bias, residual, prob, False)
+    return _bias_dropout_add_func(x_with_bias, residual, prob, False, layerscale)
 
 
 def get_bias_dropout_add(training, fused):

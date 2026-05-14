@@ -345,13 +345,12 @@ def report_theoretical_memory(args, num_microbatches=None, verbose=False):
 
     # Choose the appropriate activation memory calculation based on parallelism strategy
     if args.sequence_parallel and args.recompute_granularity == 'selective':
-        print_rank_0("compute_activation_memory with SP")
+
         activation_memory = (
             compute_activation_memory(args, num_microbatches=num_microbatches, verbose=verbose)
             / NUM_BYTES_IN_MEGABYTE
         )
     else:
-        print_rank_0("compute_activation_memory_without_sp")
         activation_memory = (
             compute_activation_memory_without_sp(args, num_microbatches=num_microbatches, verbose=verbose)
             / NUM_BYTES_IN_MEGABYTE

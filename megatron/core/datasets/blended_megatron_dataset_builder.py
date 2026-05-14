@@ -129,6 +129,7 @@ class BlendedMegatronDatasetBuilder(object):
                 if isinstance(dataset, BlendedDataset):
                     assert dataset.size is None or dataset.size == len(dataset)
                 elif isinstance(dataset, MegatronDataset):
+                    print("megatron build")
                     assert dataset.num_samples is None or dataset.num_samples <= len(dataset)
 
         return datasets
@@ -484,7 +485,7 @@ class BlendedMegatronDatasetBuilder(object):
                         self.config,
                     )
                 )
-
+        print(f"DEBUG: mid_level_datasets: {mid_level_datasets}")
         return mid_level_datasets
 
     @staticmethod

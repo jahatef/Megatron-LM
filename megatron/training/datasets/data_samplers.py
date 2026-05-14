@@ -291,6 +291,7 @@ class MegatronPretrainingRandomSampler:
         return self.total_samples
 
     def __iter__(self):
+        print(f"DEBUG: USING MegatronPretrainingRandomSampler")
         active_total_samples = self.total_samples - self.last_batch_size
         self.epoch = self.consumed_samples // active_total_samples
         current_epoch_samples = self.consumed_samples % active_total_samples

@@ -517,6 +517,7 @@ def _warmup_jit_function():
         dtype=dtype,
         device="cuda",
     )
+    layerscale = torch.rand(args.hidden_size, dtype=dtype, device="cuda")
     bias = torch.rand((args.hidden_size), dtype=dtype, device="cuda").expand_as(residual)
     dropout_rate = 0.1
     # Warmup JIT fusions with the input grad_enable state of both forward
@@ -526,7 +527,7 @@ def _warmup_jit_function():
         bias.requires_grad = bias_grad
         residual.requires_grad = residual_grad
         for _ in range(5):
-            output = bias_dropout_add_fused_train([input, bias], residual, dropout_rate)
+            output = bias_dropout_add_fused_train([input, bias], residual, dropout_rate, layerscale)
     del bias, input, residual, output
     torch.cuda.empty_cache()
 
