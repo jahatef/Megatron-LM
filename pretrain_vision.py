@@ -58,6 +58,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
         self.img_w = args.img_size
         self.rotary_base = args.vit_rotary_base
         self.rope_impl = args.vit_rope_impl
+        self.rope_fraction = args.vit_rotary_fraction
         self.num_patches = (self.img_h // self.patch_size) * (self.img_w // self.patch_size)
         self.dropout = args.hidden_dropout
 
@@ -106,6 +107,7 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
                 num_heads=config.num_attention_heads,
                 rotary_base = self.rotary_base,
                 rope_impl = self.rope_impl,
+                rope_fraction = self.rope_fraction,
             )
         else:
             self.rotary_emb = None

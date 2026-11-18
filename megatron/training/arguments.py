@@ -1822,6 +1822,9 @@ def _add_network_size_args(parser):
                        help='Base to use for ViT rotary positional embeddings, default: ' \
                        'learned, per-head base. Must be either None, a tuple of size 1,' \
                        'or a tuple of size num-attention-heads')
+    group.add_argument('--vit-rotary-fraction', type=float, default=1.0,
+                       help='The fraction of channels that rope will be applied to at attention. ' \
+                       'All other channels will get a 0 degree rotation')
     group.add_argument('--rotary-percent', type=float, default=1.0,
                        help='Percent of rotary dimension to use, default 100%%')
     group.add_argument('--rotary-interleaved', action='store_true',
