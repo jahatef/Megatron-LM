@@ -9,6 +9,7 @@ export WORLD_SIZE=$(($GPUS_PER_NODE * $NUM_NODES))
 IMG_SIZE={{IMG_SIZE}}
 ROPE_TYPE="{{ROPE_TYPE}}"
 ROPE_BASE_TAG="{{ROPE_BASE_TAG}}"
+ROPE_FRACTION="{{ROPE_FRACTION}}"
 
 DISTRIBUTED_ARGS=(
     --nproc_per_node $GPUS_PER_NODE 
@@ -28,6 +29,7 @@ GPT_MODEL_ARGS=(
     --vit-rope-impl {{ROPE_TYPE}}
     #--vit-rotary-base "10,20,30,40,50,60,70,80,90,100,110,120" \
     {{ROPE_BASE_LINE}}
+    --vit-rotary-fraction {{ROPE_FRACTION}} \
     --img-size $IMG_SIZE \
     --patch-dim 16 \
     --attention-backend flash # Can use (flash/fused/unfused/local)
@@ -37,7 +39,7 @@ GPT_MODEL_ARGS=(
 TRAINING_ARGS=(
     --micro-batch-size {{MICRO_BATCH}}
     --global-batch-size {{GLOBAL_BATCH}}
-    --train-iters 553    
+    --train-iters 790    
     --finetune
     --weight-decay 0.2 
     --adam-beta1 0.9 
@@ -49,7 +51,7 @@ TRAINING_ARGS=(
     --lr-decay-style cosine 
     --min-lr 1.0e-6
     --lr-warmup-fraction .005 
-    --lr-decay-iters 553
+    --lr-decay-iters 790
     --recompute-granularity selective 
     #--profile
     --profile-step-start 3
@@ -79,7 +81,6 @@ EVAL_AND_LOGGING_ARGS=(
     --eval-interval 79 
     --eval-iters 10
     --tensorboard-log-interval 20
-    --pretrained-checkpoint "/home/hatef.4/megatron/Megatron-LM/checkpoints-warmup-500"
     --tensorboard-dir "/home/hatef.4/megatron/Megatron-LM/logs"
     --ckpt-format torch
     --tensorboard-dir "/home/hatef.4/megatron/Megatron-LM/logs"
@@ -89,12 +90,12 @@ EVAL_AND_LOGGING_ARGS=(
     --log-params-norm
     --timing-log-level 0
     --log-energy
-    --wandb-project vit-synth-rope-experiments
-    --save "/home/hatef.4/megatron/Megatron-LM/checkpoints-$ROPE_TYPE-$ROPE_BASE_TAG-$IMG_SIZE"
+    --wandb-project rope-pretrains
+    --save "/home/hatef.4/megatron/Megatron-LM/pretrain/checkpoints-$ROPE_TYPE-$ROPE_BASE_TAG-$IMG_SIZE-$ROPE_FRACTION-10epochs"
     --save-retain-interval 79
     --no-save-optim
     --no-save-rng
-    --wandb-exp-name $ROPE_TYPE-$ROPE_BASE_TAG-$IMG_SIZE
+    --wandb-exp-name $ROPE_TYPE-$ROPE_BASE_TAG-$IMG_SIZE-$ROPE_FRACTION-10epochs
 )
 export NCCL_DEBUG=WARN
 
