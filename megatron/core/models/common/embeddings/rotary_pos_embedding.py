@@ -450,6 +450,20 @@ def _init_rotary_base(module, rotary_base, num_heads, axes=2):
         "Invalid rotary_base length for given axes/head config"
     )
 
+def _rotary_dim_from_fraction(dim, rope_fraction, multiple):
+    rotary_dim = int(dim * rope_fraction)
+    rotary_dim = (rotary_dim // multiple) * multiple
+    rotary_dim = max(multiple, min(rotary_dim, dim))
+    if rotary_dim != dim * rope_fraction:
+        logger.warning(...)            # e.g. 0.3 * 64 = 19.2 -> 16
+    return rotary_dim
+
+def _get_periods(rotary_dim, rotary_base, multiple):
+        # n frequencies per axis, from 1 (fastest) down to exactly 1/base (slowest)
+        n = rotary_dim // multiple
+        exponents = torch.linspace(0, 1, n, dtype=torch.float32)
+        return 1 / (rotary_base ** exponents)
+
 class RotaryEmbeddingAxial(nn.Module):
     """Axial RoPE numerics matching DINOv3 for Vision Transformers.
 
@@ -484,13 +498,13 @@ class RotaryEmbeddingAxial(nn.Module):
         self.axes = 1
         self.normalize_coords = normalize_coords
 
+        #axial rope divides the head dimension by 4
+        self.multiple = 4
+
         # Number of channels that receive RoPE.
         # Rounded down to nearest multiple of 4 so that
         # the frequency construction remains valid.
-        self.rotary_dim = int(dim * rope_fraction)
-        self.rotary_dim = (self.rotary_dim // 4) * 4
-        self.rotary_dim = max(4, self.rotary_dim)
-        self.rotary_dim = min(self.rotary_dim, dim)
+        self.rotary_dim = _rotary_dim_from_fraction(dim, rope_fraction, 4)
 
         self.rotary_base = self._init_rotary_base(
             num_heads=num_heads,
@@ -517,18 +531,6 @@ class RotaryEmbeddingAxial(nn.Module):
 
         return rotary_base[:, None].repeat(1, axes)
 
-    def _get_periods(self, device):
-        return 1 / (
-            self.rotary_base.to(device)
-            ** torch.arange(
-                0,
-                1,
-                4 / self.rotary_dim,
-                dtype=torch.float32,
-                device=device,
-            )
-        )
-
     def _build_coords(self, H: int, W: int, device) -> Tensor:
         y, x = torch.meshgrid(
             torch.arange(H, device=device),
@@ -541,7 +543,7 @@ class RotaryEmbeddingAxial(nn.Module):
 
     def get_embed(self, H: int, W: int, device) -> Tensor:
         coords = self._build_coords(H, W, device)
-        periods = self._get_periods(device)
+        periods = _get_periods(self.rotary_dim, self.rotary_base, self.multiple).to(device)
 
         coords = coords[:, :, None, None]
 
@@ -553,19 +555,6 @@ class RotaryEmbeddingAxial(nn.Module):
             angles = angles.tile(2)
         else:
             angles = angles.repeat_interleave(2, dim=-1)
-
-        # Keep only rotary_dim channels
-        angles = angles[..., : self.rotary_dim]
-
-        # Pad remaining channels with zeros so they are not rotated
-        if self.rotary_dim < self.dim:
-            pad = torch.zeros(
-                *angles.shape[:-1],
-                self.dim - self.rotary_dim,
-                device=angles.device,
-                dtype=angles.dtype,
-            )
-            angles = torch.cat([angles, pad], dim=-1)
 
         return angles[:, None, :, :]
 
@@ -579,12 +568,6 @@ class RotaryEmbeddingAxial(nn.Module):
             device = self.rotary_base.device
 
         return self.get_embed(H, W, device)
-
-import math
-
-import torch
-import torch.nn as nn
-
 
 class RotaryEmbeddingMixedAxis(nn.Module):
     """
@@ -620,13 +603,13 @@ class RotaryEmbeddingMixedAxis(nn.Module):
         self.rotate_half = rotate_half
         self.axes = 1
 
+        #mixed axis rope divides the head dimension by 4
+        self.multiple = 4
+
         # Number of output channels that receive RoPE.
         # Must be divisible by 4 because mixed-axis RoPE
         # builds frequencies in dim/4 chunks.
-        self.rotary_dim = int(dim * rope_fraction)
-        self.rotary_dim = (self.rotary_dim // 4) * 4
-        self.rotary_dim = max(4, self.rotary_dim)
-        self.rotary_dim = min(self.rotary_dim, dim)
+        self.rotary_dim = _rotary_dim_from_fraction(dim, rope_fraction, self.multiple)
 
         learned_thetas = rotary_base is None
 
@@ -635,13 +618,8 @@ class RotaryEmbeddingMixedAxis(nn.Module):
             rotary_base,
             self.axes,
         )
-
-        base = (
-            torch.arange(0, self.rotary_dim, 4).float()
-            / self.rotary_dim
-        )
-
-        mag = 1 / (self.rotary_base ** base)
+        
+        mag = _get_periods(self.rotary_dim, self.rotary_base, self.multiple)
 
         freqs = []
 
@@ -717,17 +695,6 @@ class RotaryEmbeddingMixedAxis(nn.Module):
         else:
             angles = angles.repeat_interleave(2, dim=-1)
 
-        # angles now has size rotary_dim
-
-        if self.rotary_dim < self.dim:
-            pad = torch.zeros(
-                *angles.shape[:-1],
-                self.dim - self.rotary_dim,
-                dtype=angles.dtype,
-                device=angles.device,
-            )
-            angles = torch.cat([angles, pad], dim=-1)
-
         return angles[:, None, :, :]
 
     def forward(self, H, W, device=None):
@@ -785,10 +752,9 @@ class RotaryEmbeddingPolar(nn.Module):
         # Number of channels that receive RoPE.
         # Must be divisible by 4 because the frequency
         # construction generates dim/4 unique frequencies.
-        self.rotary_dim = int(dim * rope_fraction)
-        self.rotary_dim = (self.rotary_dim // 4) * 4
-        self.rotary_dim = max(4, self.rotary_dim)
-        self.rotary_dim = min(self.rotary_dim, dim)
+        self.multiple = 4 
+
+        self.rotary_dim = _rotary_dim_from_fraction(dim, rope_fraction, self.multiple)
 
         self.rotary_base = self._init_rotary_base(
             num_heads,
@@ -817,18 +783,6 @@ class RotaryEmbeddingPolar(nn.Module):
 
         return rotary_base[:, None].repeat(1, axes)
 
-    def _get_periods(self, device):
-        return 1 / (
-            self.rotary_base.to(device)
-            ** torch.arange(
-                0,
-                1,
-                4 / self.rotary_dim,
-                dtype=torch.float32,
-                device=device,
-            )
-        )
-
     def _build_coords(self, H: int, W: int, device) -> Tensor:
         y, x = torch.meshgrid(
             torch.arange(H, device=device),
@@ -848,7 +802,7 @@ class RotaryEmbeddingPolar(nn.Module):
 
     def get_embed(self, H: int, W: int, device) -> Tensor:
         coords = self._build_coords(H, W, device)
-        periods = self._get_periods(device)
+        periods = _get_periods(self.rotary_dim, self.rotary_base, self.multiple).to(device)
 
         coords = coords[:, :, None, None]
 
@@ -864,16 +818,6 @@ class RotaryEmbeddingPolar(nn.Module):
         # Keep only rotary_dim channels
         angles = angles[..., : self.rotary_dim]
 
-        # Pad non-RoPE channels with zeros
-        if self.rotary_dim < self.dim:
-            pad = torch.zeros(
-                *angles.shape[:-1],
-                self.dim - self.rotary_dim,
-                device=angles.device,
-                dtype=angles.dtype,
-            )
-            angles = torch.cat([angles, pad], dim=-1)
-
         return angles[:, None, :, :]
 
     def forward(
@@ -887,13 +831,6 @@ class RotaryEmbeddingPolar(nn.Module):
 
         return self.get_embed(H, W, device)
     
-import math
-
-import torch
-import torch.nn as nn
-from torch import Tensor
-
-
 class RotaryEmbeddingPolarMixedAxis(nn.Module):
     """
     Mixed-axis Polar RoPE for Vision Transformers.
@@ -937,10 +874,9 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
         # Number of output channels that receive RoPE.
         # Rounded down to nearest multiple of 4 since the
         # mixed-axis construction uses dim/4 frequency bands.
-        self.rotary_dim = int(dim * rope_fraction)
-        self.rotary_dim = (self.rotary_dim // 4) * 4
-        self.rotary_dim = max(4, self.rotary_dim)
-        self.rotary_dim = min(self.rotary_dim, dim)
+        self.multiple = 4 
+
+        self.rotary_dim = _rotary_dim_from_fraction(dim, rope_fraction, self.multiple)
 
         learned_thetas = rotary_base is None
 
@@ -955,7 +891,7 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
             / self.rotary_dim
         )
 
-        mag = 1 / (self.rotary_base ** base)
+        mag = _get_periods(self.rotary_dim, self.rotary_base, self.multiple)
 
         freqs = []
 
@@ -1037,17 +973,6 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
         else:
             angles = angles.repeat_interleave(2, dim=-1)
 
-        # angles now has size rotary_dim
-
-        if self.rotary_dim < self.dim:
-            pad = torch.zeros(
-                *angles.shape[:-1],
-                self.dim - self.rotary_dim,
-                device=angles.device,
-                dtype=angles.dtype,
-            )
-            angles = torch.cat([angles, pad], dim=-1)
-
         return angles[:, None, :, :]
 
     def forward(
@@ -1060,10 +985,6 @@ class RotaryEmbeddingPolarMixedAxis(nn.Module):
             device = self.freqs.device
 
         return self.get_embed(H, W, device)
-
-import torch
-import torch.nn as nn
-
 
 class RotaryEmbeddingHilbert(nn.Module):
     """
@@ -1099,10 +1020,9 @@ class RotaryEmbeddingHilbert(nn.Module):
 
         # Number of channels receiving RoPE.
         # Hilbert uses dim/2 frequencies, so round to a multiple of 2.
-        self.rotary_dim = int(dim * rope_fraction)
-        self.rotary_dim = (self.rotary_dim // 2) * 2
-        self.rotary_dim = max(2, self.rotary_dim)
-        self.rotary_dim = min(self.rotary_dim, dim)
+        self.multiple = 2
+
+        self.rotary_dim = _rotary_dim_from_fraction(dim, rope_fraction, self.multiple)
 
         self.rotary_base = self._init_rotary_base(
             num_heads,
@@ -1113,13 +1033,6 @@ class RotaryEmbeddingHilbert(nn.Module):
         # Match original implementation:
         # supplied bases are assumed sqrt(base)
         self.rotary_base = self.rotary_base ** 2
-
-        self.register_buffer(
-            "base",
-            torch.arange(0, self.rotary_dim, 2).float()
-            / self.rotary_dim,
-            persistent=False,
-        )
 
     def _init_rotary_base(self, num_heads, rotary_base, axes):
         if rotary_base is None:
@@ -1195,11 +1108,7 @@ class RotaryEmbeddingHilbert(nn.Module):
 
     def get_embed(self, H, W, device):
         coords = self.build_hilbert_grid(H, W, device)
-
-        freq = 1 / (
-            self.rotary_base.to(device)
-            ** self.base.to(device)
-        )
+        freq = _get_periods(self.rotary_dim, self.rotary_base, self.multiple).to(device)
 
         N = H * W
 
@@ -1232,17 +1141,6 @@ class RotaryEmbeddingHilbert(nn.Module):
             angles = torch.cat([angles, angles], dim=-1)
         else:
             angles = angles.repeat_interleave(2, dim=-1)
-
-        # angles now has size rotary_dim
-
-        if self.rotary_dim < self.dim:
-            pad = torch.zeros(
-                *angles.shape[:-1],
-                self.dim - self.rotary_dim,
-                device=angles.device,
-                dtype=angles.dtype,
-            )
-            angles = torch.cat([angles, pad], dim=-1)
 
         return angles
 
