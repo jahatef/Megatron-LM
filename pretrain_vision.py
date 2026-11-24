@@ -144,7 +144,8 @@ class MegatronViT(GraphableMegatronModule, MegatronModule):
     def _init_weights(self):
         if self.pos_embed is not None:
             torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
-            torch.nn.init.trunc_normal_(self.cls_token, std=0.02)
+        # cls_token exists for every pos-embed type (incl. rope), so init it unconditionally.
+        torch.nn.init.trunc_normal_(self.cls_token, std=0.02)
 
     def set_input_tensor(self, input_tensor: Tensor):
         """Set input tensor to be used instead of forward()'s input.

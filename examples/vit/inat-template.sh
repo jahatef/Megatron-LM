@@ -91,7 +91,11 @@ EVAL_AND_LOGGING_ARGS=(
     --timing-log-level 0
     --log-energy
     --wandb-project rope-pretrains
-    --save "/home/hatef.4/megatron/Megatron-LM/pretrain/checkpoints-$ROPE_TYPE-$ROPE_BASE_TAG-$IMG_SIZE-$ROPE_FRACTION-10epochs"
+    --pretrained-ckpt "/home/hatef.4/megatron/Megatron-LM/checkpoints-warmup"
+    --load "/home/hatef.4/megatron/Megatron-LM/finetune/checkpoints-$ROPE_TYPE-$ROPE_BASE_TAG-$IMG_SIZE-$ROPE_FRACTION-10epochs"
+    --no-load-optim 
+    --no-load-rng
+    --save "/home/hatef.4/megatron/Megatron-LM/finetune/checkpoints-$ROPE_TYPE-$ROPE_BASE_TAG-$IMG_SIZE-$ROPE_FRACTION-10epochs"
     --save-retain-interval 79
     --no-save-optim
     --no-save-rng

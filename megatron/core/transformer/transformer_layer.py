@@ -462,10 +462,13 @@ class TransformerLayer(GraphableMegatronModule, BaseTransformerLayer):
         # self.bias_dropout_add_exec_handler = nullcontext if use_nvfuser else torch.enable_grad
         
         self.bias_dropout_add_exec_handler = torch.enable_grad
-        self.gamma_1 = torch.nn.Parameter(torch.empty(self.config.hidden_size, dtype=torch.float16,
-                    device=torch.cuda.current_device()))
-        self.gamma_2 = torch.nn.Parameter(torch.empty(self.config.hidden_size, dtype=torch.float16,
-                    device=torch.cuda.current_device()))
+        # LayerScale (CaiT / DeiT-III). Overwritten when loading a converted timm
+        # checkpoint; for scratch training it must be initialized here.
+        ls_init = self.config.layer_scale_init_value
+        self.gamma_1 = torch.nn.Parameter(torch.full((self.config.hidden_size,), ls_init,
+                    dtype=self.config.params_dtype, device=torch.cuda.current_device()))
+        self.gamma_2 = torch.nn.Parameter(torch.full((self.config.hidden_size,), ls_init,
+                    dtype=self.config.params_dtype, device=torch.cuda.current_device()))
 
     @staticmethod
     def _get_layer_offset(config: TransformerConfig):

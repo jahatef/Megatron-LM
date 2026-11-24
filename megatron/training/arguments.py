@@ -1822,6 +1822,9 @@ def _add_network_size_args(parser):
                        help='Base to use for ViT rotary positional embeddings, default: ' \
                        'learned, per-head base. Must be either None, a tuple of size 1,' \
                        'or a tuple of size num-attention-heads')
+    group.add_argument('--layer-scale-init-value', type=float, default=1.0,
+                       help='Init value for LayerScale gammas (gamma_1/gamma_2) in every '
+                       'transformer layer. Use 1e-4 to match DeiT-III/RoPE-ViT _LS models.')
     group.add_argument('--vit-rotary-fraction', type=float, default=1.0,
                        help='The fraction of channels that rope will be applied to at attention. ' \
                        'All other channels will get a 0 degree rotation')

@@ -50,6 +50,7 @@ def _bias_dropout_add_func(x_with_bias, residual, prob, training, layerscale):
             out = residual + out
         return out
     else:
+        x = layerscale * x
         out = torch.nn.functional.dropout(x, p=prob, training=training, inplace=inplace)
         if inplace:
             out.add_(residual)
@@ -59,8 +60,8 @@ def _bias_dropout_add_func(x_with_bias, residual, prob, training, layerscale):
 
 
 def bias_dropout_add_unfused(training):
-    def _bias_dropout_add(x_with_bias, residual, prob):
-        return _bias_dropout_add_func(x_with_bias, residual, prob, training)
+    def _bias_dropout_add(x_with_bias, residual, prob, layerscale):
+        return _bias_dropout_add_func(x_with_bias, residual, prob, training, layerscale)
 
     return _bias_dropout_add
 

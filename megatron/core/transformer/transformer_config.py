@@ -140,6 +140,10 @@ class TransformerConfig(ModelParallelConfig):
     layernorm_epsilon: float = 1e-5
     """Epsilon value for any LayerNorm operations."""
 
+    layer_scale_init_value: float = 1.0
+    """Initial value of the per-channel LayerScale gammas (gamma_1/gamma_2). 1.0 is a
+    plain residual at init; DeiT-III / RoPE-ViT "_LS" models use 1e-4."""
+
     layernorm_zero_centered_gamma: bool = False
     """If set to True, the LayerNorm is adjusted to center the gamma values around 0. This improves
     numerical stability."""
